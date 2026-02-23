@@ -18,22 +18,46 @@ using CSV, DataFrames, Statistics, Printf, Dates
 
 
 #############################
-# Settings
+# Preliminaries
 #############################
 
-# Results directory (platform-dependent path)
-if Sys.iswindows()
-    results_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/MC_Simulation_Results"
+# Set to true to aggregate Beta MC results
+ESTIMATE_BETA = false
+
+# Set to true to aggregate Psi MC results
+ESTIMATE_PSI = false
+
+# Fixed ψ value for directory/file naming when ESTIMATE_PSI = false.
+# Must match the value returned by get_fixed_parameters() in 01_Functions.jl.
+PSI_VALUE = 0.68
+
+# Fixed β value for directory/file naming when ESTIMATE_BETA = false.
+# Must match the value returned by get_fixed_parameters() in 01_Functions.jl.
+BETA_VALUE = 1.0
+
+# Detect whether we are running on the HPC (any non-Windows system)
+HPC = !Sys.iswindows()
+
+# Construct psi and beta tags for directory and file naming.
+psi_tag = ESTIMATE_PSI ? "Psi_Estimated" : "Psi_$(PSI_VALUE)"
+beta_tag = ESTIMATE_BETA ? "Beta_Estimated" : "Beta_$(BETA_VALUE)"
+
+# Results directory (platform-dependent path, includes psi and beta tags in directory name)
+if HPC
+    results_dir = abspath("./MC_Simulation_$(psi_tag)_$(beta_tag)_Results")
 else
-    results_dir = abspath("./MC_Simulation_Results")
+    results_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/MC_Simulation_$(psi_tag)_$(beta_tag)_Results"
 end
+mkpath(results_dir)
 
-# Read true parameters (written by 02_MC_Simulation_Array.jl during simulation)
-θ_true_df = CSV.read(joinpath(results_dir, "MC_True_Parameters.csv"), DataFrame);
+# Read true parameters (written by 02_MC_Simulation_Array.jl during simulation, includes beta tag)
+θ_true_df = CSV.read(joinpath(results_dir, "MC_$(psi_tag)_$(beta_tag)_True_Parameters.csv"), DataFrame);
 
-# Extract parameter names, true values, and number of parameters
-param_names = String.(θ_true_df.parameter);
-θ_true_vec = Float64.(θ_true_df.value);
+# Extract parameter names and true values from the wide-format CSV.
+# The CSV has parameter names as column headers and a single row of values
+# (written by 02_MC_Simulation_Array.jl in transposed format).
+param_names = String.(names(θ_true_df));
+θ_true_vec = Float64.(Vector(θ_true_df[1, :]));
 N_params = length(θ_true_vec);
 
 
@@ -96,22 +120,28 @@ println("\n" * "="^70)
 println("Monte Carlo Summary ($S replications)")
 println("="^70 * "\n")
 
+# Compute summary statistics for each parameter
+mean_est_vec = zeros(N_params);
+bias_vec = zeros(N_params);
+std_vec = zeros(N_params);
+rmse_vec = zeros(N_params);
+
+for k in 1:N_params
+    estimates = results_df[!, Symbol(param_names[k])];
+    mean_est_vec[k] = mean(estimates);
+    bias_vec[k] = mean_est_vec[k] - θ_true_vec[k];
+    std_vec[k] = std(estimates);
+    rmse_vec[k] = sqrt(bias_vec[k]^2 + std_vec[k]^2);
+end
+
 # Print summary table: True, Mean, Bias, Std Dev, RMSE for each parameter
-header = @sprintf("%-8s  %12s  %12s  %12s  %12s  %12s", "Param", "True", "Mean", "Bias", "Std Dev", "RMSE")
+header = @sprintf("%-8s  %12s  %12s  %12s  %12s  %12s", "Param", "True", "Mean", "Bias", "Std Dev", "RMSE");
 println(header)
 println(repeat("-", length(header)))
 
 for k in 1:N_params
-    pname = param_names[k];
-    true_val = θ_true_vec[k];
-    estimates = results_df[!, Symbol(pname)];
-    mean_est = mean(estimates);
-    bias = mean_est - true_val;
-    std_est = std(estimates);
-    rmse = sqrt(bias^2 + std_est^2);
-
     println(@sprintf("%-8s  %12.6f  %12.6f  %12.6f  %12.6f  %12.6f",
-        pname, true_val, mean_est, bias, std_est, rmse))
+        param_names[k], θ_true_vec[k], mean_est_vec[k], bias_vec[k], std_vec[k], rmse_vec[k]))
 end
 
 
@@ -132,10 +162,10 @@ end
 #############################
 
 # Create a timestamp for uniquely naming output files
-timestamp = Dates.format(now(), "yyyy-mm-dd_HHMMSS")
+timestamp = Dates.format(now(), "yyyy-mm-dd_HHMMSS");
 
-# Save combined per-replication results to a CSV file
-combined_path = joinpath(results_dir, "MC_Results_Combined_$timestamp.csv")
+# Save combined per-replication results to a CSV file (includes beta tag for identification)
+combined_path = joinpath(results_dir, "MC_$(psi_tag)_$(beta_tag)_Results_Combined_$timestamp.csv");
 open(combined_path, "w") do io
     println(io, "S,NLL," * join(param_names, ","))
     for row in eachrow(results_df)
@@ -148,20 +178,13 @@ end
 # Print combined results save location
 println("\nCombined results saved to: $combined_path")
 
-# Save summary statistics (True, Mean, Bias, Std Dev, RMSE) to a CSV file
-summary_path = joinpath(results_dir, "MC_Summary_$timestamp.csv")
+# Save summary statistics (True, Mean, Bias, Std Dev, RMSE) to a CSV file (includes beta tag)
+summary_path = joinpath(results_dir, "MC_$(psi_tag)_$(beta_tag)_Summary_$timestamp.csv");
 open(summary_path, "w") do io
     println(io, "Param,True,Mean,Bias,Std_Dev,RMSE")
     for k in 1:N_params
-        pname = param_names[k];
-        true_val = θ_true_vec[k];
-        estimates = results_df[!, Symbol(pname)];
-        mean_est = mean(estimates);
-        bias = mean_est - true_val;
-        std_est = std(estimates);
-        rmse = sqrt(bias^2 + std_est^2);
         println(io, @sprintf("%s,%.6f,%.6f,%.6f,%.6f,%.6f",
-            pname, true_val, mean_est, bias, std_est, rmse))
+            param_names[k], θ_true_vec[k], mean_est_vec[k], bias_vec[k], std_vec[k], rmse_vec[k]))
     end
 end
 

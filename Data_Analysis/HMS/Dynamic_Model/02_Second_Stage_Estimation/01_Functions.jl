@@ -2,10 +2,38 @@
 # William Brasic
 # The University of Arizona
 # wbrasic97@gmail.com
-# December 2025
+# February 2026
 #
 # This script creates the necessary functions to estimate the dynamic model.
 # Functions are ordered by their execution sequence in 02_Estimation.jl.
+#
+# ESTIMATE_BETA flag:
+#   When ESTIMATE_BETA = true (set by calling script before include()),
+#   β (present bias) is estimated as a structural parameter instead
+#   of being fixed at 1.0. This affects:
+#     - get_fixed_parameters() still returns (ψ, β, δ) but β is ignored
+#       by the optimizer, which extracts β from θ_vec[end] instead
+#     - Parameter bounds extended (β ∈ [0.01, 1.00])
+#     - objective() extracts β from θ_vec[end], passes remaining
+#       structural parameters to get_flow_utility()
+#     - Output files named with "Beta_Estimated" tag
+#
+# ESTIMATE_PSI flag:
+#   When ESTIMATE_PSI = true (set by calling script before include()),
+#   ψ (addiction decay rate) is estimated as a structural parameter instead
+#   of being fixed at 0.68. This affects:
+#     - get_fixed_parameters() still returns (ψ, β, δ) but ψ is ignored
+#       by the optimizer, which extracts ψ from θ_vec instead
+#     - Parameter bounds extended (ψ ∈ [0.01, 1.00])
+#     - objective() extracts ψ from θ_vec, recomputes addiction
+#       transitions and trajectories at the candidate ψ
+#     - Output files named with "Psi_Estimated" tag
+#
+# Parameter vector ordering:
+#   Base:      [13 structural]
+#   PSI only:  [13 structural, ψ]
+#   BETA only: [13 structural, β]
+#   Both:      [13 structural, ψ, β]  (β always last when estimated)
 ################################################################################
 
 
@@ -18,7 +46,6 @@
 #                                  get_hh_choices, get_category_choices
 #  4. Data Loading: Alternative  — get_consumption, get_nicotine,
 #     Attributes                   get_category_index,
-#                                  get_non_fda_flavored_indicator,
 #                                  get_fda_flavored_indicator,
 #                                  get_flavored_indicator
 #  5. Data Loading: Demographics — get_teen_young_adult, get_tya_state,
@@ -55,6 +82,29 @@ for pkg in ["CSV", "DataFrames", "Optim", "Statistics", "ForwardDiff"]
 end
 using CSV, DataFrames, Optim, Statistics, ForwardDiff, LinearAlgebra, Printf, Dates
 
+# ESTIMATE_BETA flag: controls whether β (present bias) is estimated or fixed.
+# Set to true in the calling script BEFORE include() to estimate β.
+# Default is false (β fixed at 1.0, standard exponential discounting).
+if !@isdefined(ESTIMATE_BETA)
+    ESTIMATE_BETA = false
+end
+
+# ESTIMATE_PSI flag: controls whether ψ (addiction decay rate) is estimated or fixed.
+# Set to true in the calling script BEFORE include() to estimate ψ.
+# Default is false (ψ fixed at 0.68).
+if !@isdefined(ESTIMATE_PSI)
+    ESTIMATE_PSI = false
+end
+
+# WARM_START flag: controls whether VFI reuses the previous evaluation's converged V
+# as the initial guess within a Nelder-Mead run. V is reset to zeros at the start
+# of each outer try (L), inner run (M), and long run.
+# Set to true in the calling script BEFORE include() to enable warm-starting.
+# Default is false (cold start from zeros each evaluation).
+if !@isdefined(WARM_START)
+    WARM_START = false
+end
+
 
 #############################
 # 2. Logging
@@ -79,6 +129,12 @@ ra_inner_run = 0
 # Global parameter names (set by calling script before estimation)
 # Used to print parameter names in objective function logging
 est_param_names = String[]
+
+# Warm-start state for the objective function.
+# V_warm_est stores the converged V from the previous VFI solve within a NM run.
+# last_ra_phase_est tracks (outer_try, inner_run); V resets when phase changes.
+V_warm_est = nothing
+last_ra_phase_est = (0, 0)
 
 """
 Print a message to stdout and write it to the active log file (if open).
@@ -221,17 +277,17 @@ Alternative ordering:
   j = 39:40:       2 FDA flavored bundles (lo/hi cig, ecig pooled)
 
 Returns:
-- N_cig:              Number of cigarette alternatives
-- N_orig_ecig:        Number of original e-cigarette alternatives
+- N_cig:               Number of cigarette alternatives
+- N_orig_ecig:         Number of original e-cigarette alternatives
 - N_non_fda_flav_ecig: Number of non-FDA flavored e-cigarette alternatives
-- N_fda_flav_ecig:    Number of FDA flavored e-cigarette alternatives
-- N_bundle:           Number of bundle alternatives
-- c_cig:              Vector of standardized cigarette consumption for each alternative
-- c_ecig:             Vector of standardized e-cigarette consumption for each alternative
-- c_bundle:           Vector of standardized bundle consumption for each alternative
-- c_cig_max:          Raw maximum cigarette consumption (for rescaling estimates)
-- c_ecig_max:         Raw maximum e-cigarette consumption (for rescaling estimates)
-- c_bundle_max:       Raw maximum bundle consumption (for rescaling estimates)
+- N_fda_flav_ecig:     Number of FDA flavored e-cigarette alternatives
+- N_bundle:            Number of bundle alternatives
+- q_cig:               Vector of standardized cigarette consumption for each alternative
+- q_ecig:              Vector of standardized e-cigarette consumption for each alternative
+- q_bundle:            Vector of standardized bundle consumption for each alternative
+- q_cig_max:           Raw maximum cigarette consumption (for rescaling estimates)
+- q_ecig_max:          Raw maximum e-cigarette consumption (for rescaling estimates)
+- q_bundle_max:        Raw maximum bundle consumption (for rescaling estimates)
 """
 function get_consumption(
     N_J::Integer;
@@ -263,14 +319,14 @@ function get_consumption(
     N_orig_ecig         = length(orig_ecig)
     N_non_fda_flav_ecig = length(non_fda_flav_ecig)
     N_fda_flav_ecig     = length(fda_flav_ecig)
-    N_bundle_orig         = 2  # 2 original e-cig bundles (lo/hi cig)
-    N_bundle_non_fda_flav = 2  # 2 non-FDA flavored e-cig bundles (lo/hi cig)
-    N_bundle_fda_flav     = 2  # 2 FDA flavored e-cig bundles (lo/hi cig)
+    N_bundle_orig         = 2                                               # 2 original e-cig bundles (lo/hi cig)
+    N_bundle_non_fda_flav = 2                                               # 2 non-FDA flavored e-cig bundles (lo/hi cig)
+    N_bundle_fda_flav     = 2                                               # 2 FDA flavored e-cig bundles (lo/hi cig)
     N_bundle = N_bundle_orig + N_bundle_non_fda_flav + N_bundle_fda_flav
 
     # Initialize consumption vectors (j = 1 is outside option with zero consumption)
-    c_cig  = zeros(Float64, N_J)
-    c_ecig = zeros(Float64, N_J)
+    q_cig  = zeros(Float64, N_J)
+    q_ecig = zeros(Float64, N_J)
 
     # Fill vector in order: outside, cig, orig_ecig, non_fda_flav_ecig, fda_flav_ecig,
     # bundle_orig (2), bundle_non_fda_flav (2), bundle_fda_flav (2)
@@ -278,53 +334,53 @@ function get_consumption(
 
     # Cigarette consumption
     for consumption in cig
-        c_cig[idx] = consumption
+        q_cig[idx] = consumption
         idx += 1
     end
 
     # Original e-cig alternatives
     for consumption in orig_ecig
-        c_ecig[idx] = consumption
+        q_ecig[idx] = consumption
         idx += 1
     end
 
     # Non-FDA flavored e-cig alternatives
     for consumption in non_fda_flav_ecig
-        c_ecig[idx] = consumption
+        q_ecig[idx] = consumption
         idx += 1
     end
 
     # FDA flavored e-cig alternatives
     for consumption in fda_flav_ecig
-        c_ecig[idx] = consumption
+        q_ecig[idx] = consumption
         idx += 1
     end
 
     # Bundle consumption (6 bundles total: 2 orig + 2 non-FDA flav + 2 FDA flav)
     for bundle_name in bundle_names
-        c_cig[idx]  = get_consumption_value(bundle_name * "_cig")
-        c_ecig[idx] = get_consumption_value(bundle_name * "_ecig")
+        q_cig[idx]  = get_consumption_value(bundle_name * "_cig")
+        q_ecig[idx] = get_consumption_value(bundle_name * "_ecig")
         idx += 1
     end
 
     # Compute bundle interaction BEFORE standardizing individual consumption
-    # c_bundle[j] = c_cig[j] × c_ecig[j] (only non-zero for bundle alternatives)
-    c_bundle_raw = c_cig .* c_ecig
-    c_bundle_max = maximum(c_bundle_raw)
+    # q_bundle[j] = q_cig[j] × q_ecig[j] (only non-zero for bundle alternatives)
+    q_bundle_raw = q_cig .* q_ecig
+    q_bundle_max = maximum(q_bundle_raw)
+
+    # Standardize bundle INTERACTION by its own max
+    # This keeps α_CE at a reasonable magnitude since bundles don't have max consumption
+    # of both products simultaneously
+    q_bundle = q_bundle_raw ./ q_bundle_max
 
     # Standardize by maximum (store raw max for rescaling estimates later)
     # Each variable is standardized by its own max to keep coefficients reasonably scaled
-    c_cig_max  = maximum(c_cig)
-    c_ecig_max = maximum(c_ecig)
-    c_cig  ./= c_cig_max
-    c_ecig ./= c_ecig_max
+    q_cig_max  = maximum(q_cig)
+    q_ecig_max = maximum(q_ecig)
+    q_cig  ./= q_cig_max
+    q_ecig ./= q_ecig_max
 
-    # Standardize bundle INTERACTION by its own max
-    # This keeps α_TE at a reasonable magnitude since bundles don't have max consumption
-    # of both products simultaneously
-    c_bundle = c_bundle_raw ./ c_bundle_max
-
-    return N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, N_bundle, c_cig, c_ecig, c_bundle, c_cig_max, c_ecig_max, c_bundle_max
+    return N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, N_bundle, q_cig, q_ecig, q_bundle, q_cig_max, q_ecig_max, q_bundle_max
 end
 
 
@@ -512,23 +568,6 @@ end
 
 
 """
-Get non-FDA flavored indicator for each alternative j = 1, ..., N_J.
-Non-FDA flavored alternatives are: non-FDA flavored e-cigarette bins (cat = 3)
-and the cig + non-FDA flavored ecig bundle (cat = 6).
-
-Returns:
-- is_non_fda_flavored: Vector where true indicates a non-FDA flavored alternative
-"""
-function get_non_fda_flavored_indicator(
-    cat_idx::AbstractVector{<:Integer}
-)
-
-    # Non-FDA flavored categories are 3 (non-FDA flav ecig) and 6 (bundle with non-FDA flav ecig)
-    return (cat_idx .== 3) .| (cat_idx .== 6)
-end
-
-
-"""
 Get FDA flavored indicator for each alternative j = 1, ..., N_J.
 FDA flavored alternatives are: FDA flavored e-cigarette bins (cat = 4)
 and the cig + FDA flavored ecig bundle (cat = 7).
@@ -549,6 +588,8 @@ end
 Get flavored indicator for each alternative j = 1, ..., N_J.
 Flavored alternatives are: any flavored e-cigarette bins (cat ∈ {3, 4}) and
 any cig + flavored ecig bundle (cat ∈ {6, 7}). Union of non-FDA and FDA flavored.
+
+Used by get_flow_utility() for the λ₁, λ₂ terms (which apply to all flavored products).
 
 Returns:
 - is_flavored: Vector where true indicates a flavored alternative (non-FDA or FDA)
@@ -594,6 +635,8 @@ end
 """
 Get teen or young adult state index for each observation.
 
+THIS IS THE TWO STATE VERSION USED IN THE STATIC LOGIT ESTIMATION
+
 Maps the binary indicator to an array index:
   0 (no TYA present) ⟹ state 1
   1 (TYA present)    ⟹ state 2
@@ -616,10 +659,10 @@ end
 Get 4-state TYA classification for each observation.
 
 Loads pre-computed TYA state assignments from 05_TYA_State_Transitions.R.
-  State 1: No TYA, stable (oldest child ≤ 10 or no children)
-  State 2: No TYA, approaching (oldest child 11-12)
-  State 3: TYA present, stable (youngest TYA member ≤ 23)
-  State 4: TYA present, ending soon (youngest TYA member ≥ 24)
+  State 1: No TYA, stable (oldest child ≤ 11 or no children)
+  State 2: No TYA, approaching (oldest child 12)
+  State 3: TYA present, stable (youngest TYA member ≤ 24)
+  State 4: TYA present, ending soon (youngest TYA member ≥ 25)
 
 Returns:
 - tya_state: Vector{Int} of state indices (1-4) for each observation
@@ -636,19 +679,23 @@ end
 """
 Get 4×4 TYA transition probability matrix.
 
-Loads pre-computed monthly transition probabilities from
-05_TYA_State_Transitions.R. Π[s, s'] = P(TYA state next month = s' | current = s).
+Loads pre-computed monthly transition probabilities
+Π[s, s'] = P(TYA state next month = s' | current = s).
 
 Returns:
-- Π: 4×4 row-stochastic transition matrix
+- Π: 4 × 4 row-stochastic transition matrix
 """
 function get_tya_transitions(;
     file_name::AbstractString = "./TYA_Transition_Matrix.csv"
 )
 
+    # Load in transition probabilities
     df = CSV.read(file_name, DataFrame)
 
+    # Initialize transition matrix 
     Π = zeros(Float64, 4, 4)
+
+    # Fill in transition matrix 
     for row in eachrow(df)
         Π[row.from, row.to] = row.prob
     end
@@ -666,17 +713,23 @@ end
 """
 Set fixed parameters
 
+Always returns (ψ, β, δ). When ESTIMATE_BETA = true, the returned β = 1.0
+is ignored — the optimizer extracts β from θ_vec[end] instead.
+When ESTIMATE_PSI = true, the returned ψ = 0.68 is ignored — the optimizer
+extracts ψ from θ_vec instead.
+
 Returns:
-- Addiction decay rate ψ
-- Present bias term β
+- Addiction decay rate ψ (fixed at 0.68; overridden by optimizer when ESTIMATE_PSI = true)
+- Present bias term β (fixed at 1.0; overridden by optimizer when ESTIMATE_BETA = true)
 - Monthly discount factor δ
 """
 function get_fixed_parameters()
 
-    # Addiction decay rate (fixed from reduced-form AR(1) estimate)
-    ψ = 0.6784
+    # Addiction decay rate (fixed; overridden by optimizer when ESTIMATE_PSI = true)
+    ψ = 0.68
 
     # Present bias parameter (β-δ discounting; β = 1.0 is standard exponential)
+    # When ESTIMATE_BETA = true, this value is overridden by the optimizer
     β = 1.0
 
     # Monthly discount factor
@@ -745,8 +798,7 @@ Get price ratios for quantity discount adjustment.
 Price ratios capture that per-unit prices vary systematically across quantity bins:
 small-quantity bins pay more per unit (ratio > 1), large-quantity bins pay less (ratio < 1).
 
-Reads Price_Ratios.csv (generated by 01_Data_Prep.R) which contains:
-  alternative, median_price, overall_median, ratio
+Reads Price_Ratios.csv which contains alternative, median_price, overall_median, ratio
 
 Returns two vectors indexed by alternative j ∈ {1, ..., N_J}:
 - ratio_cig:  Cig price ratio for each alternative (1.0 for non-cig components)
@@ -758,8 +810,8 @@ function get_price_ratios(
     N_orig_ecig::Integer,
     N_non_fda_flav_ecig::Integer,
     N_fda_flav_ecig::Integer,
-    c_cig::AbstractVector{<:Real},
-    c_ecig::AbstractVector{<:Real};
+    q_cig::AbstractVector{<:Real},
+    q_ecig::AbstractVector{<:Real};
     file_name::AbstractString = "./Price_Ratios.csv"
 )
 
@@ -776,7 +828,7 @@ function get_price_ratios(
     ratio_cig  = ones(Float64, N_J)
     ratio_ecig = ones(Float64, N_J)
 
-    # Cig bin names (must match 01_Data_Prep.R ordering)
+    # Cig bin names 
     cig_names = ["cig_1", "cig_2", "cig_3to4", "cig_5to9", "cig_10", "cig_11to19",
                  "cig_20", "cig_21to29", "cig_30", "cig_31to39", "cig_40", "cig_41plus"]
 
@@ -819,14 +871,14 @@ function get_price_ratios(
     # j=35:40: bundles — map each bundle's consumption to the closest standalone bin's ratio
     for j in idx:N_J
         # Cig component: find standalone cig bin with closest consumption
-        if c_cig[j] > 0.0
-            best_cig = argmin(abs(c_cig[k] - c_cig[j]) for k in cig_range)
+        if q_cig[j] > 0.0
+            best_cig = argmin(abs(q_cig[k] - q_cig[j]) for k in cig_range)
             ratio_cig[j] = ratio_cig[cig_range[best_cig]]
         end
 
         # Ecig component: find closest ecig bin (ratios are pooled across orig/flav)
-        if c_ecig[j] > 0.0
-            best_ecig = argmin(abs(c_ecig[k] - c_ecig[j]) for k in ecig_range)
+        if q_ecig[j] > 0.0
+            best_ecig = argmin(abs(q_ecig[k] - q_ecig[j]) for k in ecig_range)
             ratio_ecig[j] = ratio_ecig[ecig_range[best_ecig]]
         end
     end
@@ -842,16 +894,16 @@ Get expenditure matrix indexed by combined price state p ∈ {1, ..., N_Pcomb}
 and alternative j ∈ {1, ..., N_J}.
 
 Expenditure for alternative j at combined price state p is:
-  E[p, j] = p_cig(p) × ratio_cig(j) × c_cig(j) + p_ecig(p) × ratio_ecig(j) × c_ecig(j)
+  E[p, j] = p_cig(p) × ratio_cig(j) × q_cig(j) + p_ecig(p) × ratio_ecig(j) × q_ecig(j)
 
 Price ratios capture quantity discounts: small-quantity bins have ratio > 1 (more expensive
 per unit) and large-quantity bins have ratio < 1 (cheaper per unit).
 
 This correctly handles all cases:
 - Outside option: 0 (both consumption vectors are zero)
-- Cig-only: p_cig × ratio_cig × c_cig (c_ecig is zero)
-- Ecig-only: p_ecig × ratio_ecig × c_ecig (c_cig is zero)
-- Bundles: p_cig × ratio_cig × c_cig + p_ecig × ratio_ecig × c_ecig
+- Cig-only: p_cig × ratio_cig × q_cig (q_ecig is zero)
+- Ecig-only: p_ecig × ratio_ecig × q_ecig (q_cig is zero)
+- Bundles: p_cig × ratio_cig × q_cig + p_ecig × ratio_ecig × q_ecig
 
 Expenditure is computed using RAW consumption (unstandardized) so that E is in
 actual dollars, then STANDARDIZED by dividing by the maximum expenditure.
@@ -863,18 +915,18 @@ Returns:
 function get_expenditures(
     N_J::Integer,
     N_Pcomb::Integer,
-    c_cig::AbstractVector{<:Real},
-    c_ecig::AbstractVector{<:Real},
-    c_cig_max::Real,
-    c_ecig_max::Real,
+    q_cig::AbstractVector{<:Real},
+    q_ecig::AbstractVector{<:Real},
+    q_cig_max::Real,
+    q_ecig_max::Real,
     Pcomb::AbstractMatrix{<:Real},
     ratio_cig::AbstractVector{<:Real},
     ratio_ecig::AbstractVector{<:Real}
 )
 
     # Reconstruct raw consumption from standardized values
-    c_cig_raw  = c_cig .* c_cig_max
-    c_ecig_raw = c_ecig .* c_ecig_max
+    q_cig_raw  = q_cig .* q_cig_max
+    q_ecig_raw = q_ecig .* q_ecig_max
 
     # Initialize expenditure matrix
     E = zeros(Float64, N_Pcomb, N_J)
@@ -884,7 +936,7 @@ function get_expenditures(
         p_cig  = Pcomb[p, 1]
         p_ecig = Pcomb[p, 2]
         for j in 1:N_J
-            E[p, j] = p_cig * ratio_cig[j] * c_cig_raw[j] + p_ecig * ratio_ecig[j] * c_ecig_raw[j]
+            E[p, j] = p_cig * ratio_cig[j] * q_cig_raw[j] + p_ecig * ratio_ecig[j] * q_ecig_raw[j]
         end
     end
 
@@ -979,8 +1031,10 @@ function precompute_price_transitions(
     p_ecig_hi = Matrix{Int}(undef, M, R)
     p_ecig_w  = Matrix{Float64}(undef, M, R)
 
-    # Loop over combined price states (m) and Halton draws (r)
+    # Loop over combined price states
     for m in 1:M
+
+        # Loop over Halton draws
         for r in 1:R
 
             # Clamp predicted prices to grid bounds
@@ -1013,7 +1067,6 @@ end
 Map observed household prices to the nearest combined price grid index to
 get the observed price state for each observation for likelihood computation.
 
-Prices.csv contains bin-specific prices (capturing quantity discounts).
 For the dynamic model's price state, I compute a representative price per
 category by taking the median across bins.
 
@@ -1146,21 +1199,26 @@ Pre-compute flow utility for all (tya, alternative, addiction, price) states.
 The flow utility for alternative j given addiction state a, price state p, and
 TYA state is:
 
-  u(j,a,p,tya) = α_T·c_cig[j] + α_E·c_ecig[j] + α_TE·c_cig[j]·c_ecig[j]
-               + 𝟙[non-FDA flavored]·(λ_1 + λ_2·𝟙[tya])
+  u(j,a,p,tya) = α_C·q_cig[j] + α_E·q_ecig[j] + α_CE·q_cig[j]·q_ecig[j]
+               + 𝟙[flavored]·(λ_1 + λ_2·𝟙[tya])
                + 𝟙[FDA flavored]·(λ_3 + λ_4·𝟙[tya])
-               + μ·a·n[j] + γ·a
+               + γ·a·𝟙[j=1] + μ·a·n[j]
                + ω·E[p,j]
                + ξ_k
+
+The withdrawal cost γ·a enters only the outside option (j = 1), giving γ
+direct identification from how the outside option share varies with addiction.
+When addiction is high and γ < 0, the outside option becomes less attractive,
+pushing addicted households toward consuming.
 
 The reinforcement term μ·a·n[j] captures the interaction between addiction
 stock and current nicotine intake — higher addiction increases the marginal
 utility of nicotine-delivering alternatives.
 
 For the outside option (j = 1), all consumption, expenditure, fixed effect,
-flavored, and reinforcement terms are zero, so u = γ·a. No special case needed.
+flavored, and reinforcement terms are zero, so u = γ·a.
 
-Fixed effects: ξ_T for k = 1, ξ_E for k ∈ {2, 3, 4}, ξ_TE for k ∈ {5, 6, 7}.
+Fixed effects: ξ_C for k = 1, ξ_E for k ∈ {2, 3, 4}, ξ_CE for k ∈ {5, 6, 7}.
 
 Returns:
 - U: 4D array of flow utilities, U[tya_idx, j, a_idx, p_idx]
@@ -1172,18 +1230,18 @@ function get_flow_utility(
     N_A::Integer,
     N_Pcomb::Integer,
     A::AbstractVector{<:Real},
-    c_cig::AbstractVector{<:Real},
-    c_ecig::AbstractVector{<:Real},
-    c_bundle::AbstractVector{<:Real},
+    q_cig::AbstractVector{<:Real},
+    q_ecig::AbstractVector{<:Real},
+    q_bundle::AbstractVector{<:Real},
     n::AbstractVector{<:Real},
-    is_non_fda_flavored::AbstractVector{Bool},
+    is_flavored::AbstractVector{Bool},
     is_fda_flavored::AbstractVector{Bool},
     cat_idx::AbstractVector{<:Integer},
     E::AbstractMatrix{<:Real}
 )
 
     # Unpack parameters
-    α_T, α_E, α_TE, λ_1, λ_2, λ_3, λ_4, μ, γ, ω, ξ_T, ξ_E, ξ_TE = θ
+    α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ, μ, ω, ξ_C, ξ_E, ξ_CE = θ
 
     # Number of TYA states (4-state: 1=no TYA stable, 2=no TYA approaching, 3=TYA stable, 4=TYA ending)
     N_TYA = 4
@@ -1195,11 +1253,11 @@ function get_flow_utility(
     ξ = zeros(Float64, N_J)
     for j in 1:N_J
         if cat_idx[j] == 1
-            ξ[j] = ξ_T
+            ξ[j] = ξ_C
         elseif cat_idx[j] in (2, 3, 4)
             ξ[j] = ξ_E
         elseif cat_idx[j] in (5, 6, 7)
-            ξ[j] = ξ_TE
+            ξ[j] = ξ_CE
         end
     end
 
@@ -1214,10 +1272,19 @@ function get_flow_utility(
             for j_idx in 1:N_J
 
                 # Components that do not depend on TYA state
-                u_base = (α_T * c_cig[j_idx] + α_E * c_ecig[j_idx] + α_TE * c_bundle[j_idx]
-                         + μ * a * n[j_idx] + γ * a
+                u_base = (α_C * q_cig[j_idx] + α_E * q_ecig[j_idx] + α_CE * q_bundle[j_idx]
+                         + μ * a * n[j_idx]
                          + ω * E[p_idx, j_idx]
                          + ξ[j_idx])
+
+                # Withdrawal cost: γ·a applies only to the outside option (j=1).
+                # For inside options (j>1), the reinforcement term μ·a·n[j] captures
+                # the addiction-consumption interaction. Separating γ to the outside
+                # option identifies it from how the outside option share varies with
+                # addiction, distinct from μ's within-inside-option variation.
+                if j_idx == 1
+                    u_base += γ * a
+                end
 
                 # Loop over teen or young adult state
                 for tya_idx in 1:N_TYA
@@ -1225,8 +1292,8 @@ function get_flow_utility(
                     # TYA indicator (states 1,2 ⟹ no TYA; states 3,4 ⟹ TYA present)
                     tya = (tya_idx >= 3) ? 1 : 0
 
-                    # Flow utility including non-FDA and FDA flavor effects
-                    U[tya_idx, j_idx, a_idx, p_idx] = u_base + is_non_fda_flavored[j_idx] * (λ_1 + λ_2 * tya) + is_fda_flavored[j_idx] * (λ_3 + λ_4 * tya)
+                    # Flow utility: λ₁,λ₂ for all flavored; λ₃,λ₄ additional for FDA-authorized
+                    U[tya_idx, j_idx, a_idx, p_idx] = u_base + is_flavored[j_idx] * (λ_1 + λ_2 * tya) + is_fda_flavored[j_idx] * (λ_3 + λ_4 * tya)
                 end
             end
         end
@@ -1272,14 +1339,17 @@ function precompute_addiction_transitions(
         # Loop over addiction states
         for a_idx in 1:N_A
 
-            # Next-period addiction level
+            # Next-period addiction level given current addiction and current choice
             a_prime = addiction_evolution(ψ, A[a_idx], n[j_idx])
 
             # Find upper bracket index via binary search
             hi_raw = searchsortedfirst(A, a_prime)
+
+            # Get the index right below and right above where a′ lands in the addiction grid
             lo = clamp(hi_raw - 1, 1, N_A)
             hi = clamp(hi_raw, 1, N_A)
 
+            # Assign these indices to the lower and upper addiction matrices
             a_lower[j_idx, a_idx] = lo
             a_upper[j_idx, a_idx] = hi
 
@@ -1327,7 +1397,7 @@ function get_initial_addiction_stock(
         # Get household code
         hh = hh_codes[i]
 
-        # If household code has not appeared as dictionary key yet
+        # If household code has not appeared as dictionary key yet (b/c hh codes show up more than once)
         if !haskey(hh_obs, hh)
 
             # Create empty vector as the value associated with this new key
@@ -1509,15 +1579,47 @@ end
 """
 Recompute choice-specific values from a converged state value function.
 
-This is used after VFI convergence so returned choice arrays are exactly
-consistent with the returned V_now.
+During VFI, the last iteration's V_choice values are computed using V_now from the
+PREVIOUS iteration. After convergence, V_now has been updated to
+the final converged values, but V_choice was built from the second-to-last
+V_now. This function recomputes V_choice one final time using the converged V_now so
+that the returned choice-specific values are exactly consistent with the converged
+state value function.
+
+Both solve_vfi and solve_vfi_sophisticated call this function after convergence.
+The discount_scale argument controls which value function is being recomputed:
+  - solve_vfi passes δ to recompute V_choice = U + δ·EV
+  - solve_vfi_sophisticated passes δ to recompute V_e = U + δ·EV,
+    and βδ to recompute V_d = U + βδ·EV
+
+The expected continuation value E[V(tya', a', p') | tya, a, p, j] integrates over
+three sources of uncertainty:
+  1. Price transitions: bilinear interpolation over R Halton draws (quasi-Monte Carlo)
+  2. Addiction transitions: linear interpolation between pre-computed grid brackets
+  3. TYA state transitions: weighted sum over 4 next-period TYA states using Π
+
+The computation maintains 8 accumulators (4 TYA states × 2 addiction brackets) to
+accumulate the Halton-averaged continuation values before combining via addiction
+interpolation and TYA transition integration.
+
+Arguments:
+- V_out:                    Output array to fill, V_out[tya_idx, j_idx, a_idx, p_idx] (mutated in-place)
+- V_now:                    Converged state value function, V_now[tya_idx, a_idx, p_idx]
+- U:                        Pre-computed flow utility, U[tya_idx, j_idx, a_idx, p_idx]
+- discount_scale:           Discount factor to apply (δ for experienced, βδ for decision utility)
+- Π:                    4×4 row-stochastic TYA transition matrix, Π[s, s'] = P(TYA' = s' | TYA = s)
+- N_J, N_A, N_P, N_Pcomb:   Dimensions (alternatives, addiction grid, price grid per category, combined price states)
+- inv_R:                    1/R where R is the number of Halton draws
+- p_cig_lo/hi/w:            Pre-computed cigarette price transition brackets and weights (N_Pcomb × R)
+- p_ecig_lo/hi/w:           Pre-computed e-cig price transition brackets and weights (N_Pcomb × R)
+- a_lower/upper/weight:     Pre-computed addiction transition brackets and weights (N_J × N_A)
 """
-function recompute_choice_values_4tya!(
+function recompute_choice_values!(
     V_out::Array{Float64, 4},
     V_now::Array{Float64, 3},
     U::Array{Float64, 4},
     discount_scale::Float64,
-    Π_tya::Matrix{Float64},
+    Π::Matrix{Float64},
     N_J::Integer,
     N_A::Integer,
     N_P::Integer,
@@ -1534,22 +1636,38 @@ function recompute_choice_values_4tya!(
     a_weight::Matrix{Float64}
 )
 
+    # Number of Halton draws and TYA states
     R = size(p_cig_lo, 2)
     N_TYA = 4
 
+    # Parallelize over price states (each p_idx writes to distinct memory locations)
     Threads.@threads for p_idx in 1:N_Pcomb
         @inbounds for a_idx in 1:N_A
             for j_idx in 1:N_J
+
+                # Pre-computed addiction transition brackets for (j_idx, a_idx)
+                # When consuming alternative j at addiction level a, the next-period
+                # continuous addiction a' = (1-ψ)a + ψ·n[j] falls between grid points
+                # lo_a and hi_a, with interpolation weight w_a
                 lo_a = a_lower[j_idx, a_idx]
                 hi_a = a_upper[j_idx, a_idx]
                 w_a  = a_weight[j_idx, a_idx]
 
+                # Initialize accumulators: one per (TYA state × addiction bracket)
+                # These accumulate the bilinearly-interpolated expected continuation values
+                # across all R Halton draws before averaging
                 EV_lo_1 = 0.0; EV_hi_1 = 0.0
                 EV_lo_2 = 0.0; EV_hi_2 = 0.0
                 EV_lo_3 = 0.0; EV_hi_3 = 0.0
                 EV_lo_4 = 0.0; EV_hi_4 = 0.0
 
+                # Loop over Halton draws to approximate expected continuation values via quasi-Monte Carlo
                 for r in 1:R
+
+                    # Pre-computed price transition brackets for draw r from price state p_idx
+                    # The AR(1) price process with correlated shocks gives a continuous
+                    # next-period price pair (p'_cig, p'_ecig). These are clamped to the
+                    # grid and bracketed for bilinear interpolation.
                     c_lo = p_cig_lo[p_idx, r]
                     c_hi = p_cig_hi[p_idx, r]
                     w_c  = p_cig_w[p_idx, r]
@@ -1557,16 +1675,24 @@ function recompute_choice_values_4tya!(
                     e_hi = p_ecig_hi[p_idx, r]
                     w_e  = p_ecig_w[p_idx, r]
 
+                    # Convert 2D price grid indices (cig, ecig) to 1D combined index
+                    # The combined grid is ordered: cig varies slowly, ecig varies fast
                     p_ll = (c_lo - 1) * N_P + e_lo
                     p_lh = (c_lo - 1) * N_P + e_hi
                     p_hl = (c_hi - 1) * N_P + e_lo
                     p_hh = (c_hi - 1) * N_P + e_hi
 
+                    # Bilinear interpolation weights for the 4 corners of the price grid
                     w_ll = (1 - w_c) * (1 - w_e)
                     w_lh = (1 - w_c) * w_e
                     w_hl = w_c * (1 - w_e)
                     w_hh = w_c * w_e
 
+                    # Accumulate bilinearly-interpolated V_now at each of the 4 TYA states
+                    # and 2 addiction brackets (lo_a, hi_a), for a total of 8 accumulators.
+                    # Each accumulator sums over the R Halton draws.
+
+                    # TYA state 1 (no TYA, stable)
                     EV_lo_1 += w_ll * V_now[1, lo_a, p_ll] +
                                w_lh * V_now[1, lo_a, p_lh] +
                                w_hl * V_now[1, lo_a, p_hl] +
@@ -1577,6 +1703,7 @@ function recompute_choice_values_4tya!(
                                w_hl * V_now[1, hi_a, p_hl] +
                                w_hh * V_now[1, hi_a, p_hh]
 
+                    # TYA state 2 (no TYA, approaching)
                     EV_lo_2 += w_ll * V_now[2, lo_a, p_ll] +
                                w_lh * V_now[2, lo_a, p_lh] +
                                w_hl * V_now[2, lo_a, p_hl] +
@@ -1587,6 +1714,7 @@ function recompute_choice_values_4tya!(
                                w_hl * V_now[2, hi_a, p_hl] +
                                w_hh * V_now[2, hi_a, p_hh]
 
+                    # TYA state 3 (TYA present, stable)
                     EV_lo_3 += w_ll * V_now[3, lo_a, p_ll] +
                                w_lh * V_now[3, lo_a, p_lh] +
                                w_hl * V_now[3, lo_a, p_hl] +
@@ -1597,6 +1725,7 @@ function recompute_choice_values_4tya!(
                                w_hl * V_now[3, hi_a, p_hl] +
                                w_hh * V_now[3, hi_a, p_hh]
 
+                    # TYA state 4 (TYA present, ending soon)
                     EV_lo_4 += w_ll * V_now[4, lo_a, p_ll] +
                                w_lh * V_now[4, lo_a, p_lh] +
                                w_hl * V_now[4, lo_a, p_hl] +
@@ -1608,16 +1737,23 @@ function recompute_choice_values_4tya!(
                                w_hh * V_now[4, hi_a, p_hh]
                 end
 
+                # Average over Halton draws (multiply by 1/R) and interpolate between
+                # the two addiction bracket points using weight w_a.
+                # Result: E[V(tya_s, a', p') | a, p, j] for each next-period TYA state s
                 EV_next_1 = (1 - w_a) * (EV_lo_1 * inv_R) + w_a * (EV_hi_1 * inv_R)
                 EV_next_2 = (1 - w_a) * (EV_lo_2 * inv_R) + w_a * (EV_hi_2 * inv_R)
                 EV_next_3 = (1 - w_a) * (EV_lo_3 * inv_R) + w_a * (EV_hi_3 * inv_R)
                 EV_next_4 = (1 - w_a) * (EV_lo_4 * inv_R) + w_a * (EV_hi_4 * inv_R)
 
+                # Monte Carlo integration over TYA transitions: for each current TYA state, the expected
+                # continuation value weights each next-period TYA state by its transition
+                # probability: EV = Σ_{s'} Π[s, s'] · E[V(s', a', p') | a, p, j]
+                # Then store: V_out = U + discount_scale · EV
                 for tya_idx in 1:N_TYA
-                    EV = Π_tya[tya_idx, 1] * EV_next_1 +
-                         Π_tya[tya_idx, 2] * EV_next_2 +
-                         Π_tya[tya_idx, 3] * EV_next_3 +
-                         Π_tya[tya_idx, 4] * EV_next_4
+                    EV = Π[tya_idx, 1] * EV_next_1 +
+                         Π[tya_idx, 2] * EV_next_2 +
+                         Π[tya_idx, 3] * EV_next_3 +
+                         Π[tya_idx, 4] * EV_next_4
                     V_out[tya_idx, j_idx, a_idx, p_idx] = U[tya_idx, j_idx, a_idx, p_idx] + discount_scale * EV
                 end
             end
@@ -1629,6 +1765,8 @@ end
 """
 Solve the value function via value function iteration (VFI) for the exponential or naive
 quasi hyperbolic discounting case. 
+
+WHEN RUNNING ON THE HPC, NEED TO MAKE SURE THE THREAD COUNT IS THE SAME AS THE NUMBER OF CORES I REQUEST
 
 To show how this works, initially I have V⁰_now = 0. This implies V¹_next = U since
 E[V⁰_now] = 0. Then, I update so V¹_now ⟵ V¹_next, meaning V¹_now = U. Denoting EV as the
@@ -1664,13 +1802,11 @@ The expected continuation value E[V(tya, a', p') | a, p, j] is computed by:
   3. Averaging over R Halton draws
   4. Linear interpolation across the two addiction bracket points
 
-When running on the HPC, need to make sure the thread count is the same as the number of cores I request
-
 Returns:
-- V:          Converged value function (δ only), V[tya_idx, a_idx, p_idx]
-- V_decision: Decision-utility value function (βδ), V_decision[tya_idx, j, a_idx, p_idx]
-- n_iter:     Number of iterations to convergence
-- converged:  Whether VFI converged within max_iter
+    - V:          Converged value function (δ only), V[tya_idx, a_idx, p_idx]
+    - V_decision: Decision-utility value function (βδ), V_decision[tya_idx, j, a_idx, p_idx]
+    - n_iter:     Number of iterations to convergence
+    - converged:  Whether VFI converged within max_iter
 """
 function solve_vfi(
     N_J::Integer,
@@ -1689,18 +1825,19 @@ function solve_vfi(
     p_ecig_lo::Matrix{Int},
     p_ecig_hi::Matrix{Int},
     p_ecig_w::Matrix{Float64},
-    Π_tya::Matrix{Float64};
+    Π::Matrix{Float64};
+    V_init::Union{Array{Float64, 3}, Nothing} = nothing,
     ε::Real = 1e-4,
     max_iter::Integer = 3000,
     verbose::Bool = true
 )
 
-    # Number of TYA states (4-state with transition matrix Π_tya) and Halton draws
+    # Number of TYA states (4-state with transition matrix Π) and Halton draws
     N_TYA = 4
     R     = size(p_cig_lo, 2)
 
     # Compute 1.0/R
-    # I need this because I need to average the continuation values over the R Halton draws
+    # This is helpful because I need to average the continuation values over the R Halton draws
     # and EV / R is more computationally expensive that EV * inv_R
     inv_R = 1.0 / R
 
@@ -1709,8 +1846,15 @@ function solve_vfi(
     # VFI
     #############################
 
-    # Initialize value function arrays (start from zeros each time)
+    # Initialize V_now from V_init (warm-start) or zeros (cold start).
+    # Always allocate via zeros first, then copyto! in-place to guarantee type stability.
+    # V_now:    current iterate of the ex-ante value function V[tya, a, p]
+    # V_next:   next iterate of V, computed entirely from V_now each iteration
+    # V_choice: choice-specific value V_choice[tya, j, a, p] = U + δ·EV
     V_now    = zeros(Float64, N_TYA, N_A, N_Pcomb)
+    if V_init !== nothing
+        copyto!(V_now, V_init)
+    end
     V_next   = zeros(Float64, N_TYA, N_A, N_Pcomb)
     V_choice = zeros(Float64, N_TYA, N_J, N_A, N_Pcomb)
 
@@ -1723,46 +1867,45 @@ function solve_vfi(
     # Previous iterations sup-norm across all states
     prev_diff = Inf
 
-    # VFI timer
+    # Time VFI
     t_vfi = time()
     for iter in 1:max_iter
+
+        # Update iteration counter
         n_iter = iter
 
-        # Compute V_choice and V_next for all states
-        # Parallelize over price states (each p_idx writes to distinct memory)
+        # Parallelize over combined price states.
+        # Each thread writes to disjoint p_idx slices of V_next, V_choice.
         Threads.@threads for p_idx in 1:N_Pcomb
 
-            # Inbounds just tells Julia that there is no need to check that A[i] actually exists
+            # Loop over addiction states 
             @inbounds for a_idx in 1:N_A
 
-                # Loop over alternatives
+                # Loop over alternatives 
                 for j_idx in 1:N_J
 
-                    # Pre-computed addiction transition brackets for (j_idx, a_idx)
-                    # When I consume alternative j while having addiction level a, I 
-                    # get some continuous addiction a′. lo_a is the index of the grid immediately
-                    # preceeding a′ and hi_a is the index of the grid immediately
-                    # proceeding a′. w_a is the associated interpolation weight
-                    # depending on which grid point a′ is closest to.
+                    # Get addiction transition brackets for (j, a) 
+                    # When the agent in addiction state a_idx chooses alternative j_idx,
+                    # next-period addiction is ã' = (1-ψ)·ã + ψ·n[j]. This generally
+                    # falls between two grid points. lo_a and hi_a are the bracketing
+                    # grid indices, w_a is the weight on hi_a (linear interpolation).
                     lo_a = a_lower[j_idx, a_idx]
                     hi_a = a_upper[j_idx, a_idx]
                     w_a  = a_weight[j_idx, a_idx]
 
-                    # Accumulate expected continuation value over Halton draws
-                    # Separate accumulators for each TYA state (1-4) and addiction bracket (lo/hi)
-                    # For each low and high addiction grid points and TYA state,
-                    # we do a bilinear interpolation over the two price categories.
-                    # Then, we combine lo and hi using a single interpolation over the addiction grid.
-                    # Finally, we integrate over TYA transitions using Π_tya.
+                    # Accumulate EV over Halton draws at each addiction bracket 
+                    # We need EV at the low and high addiction brackets separately,
+                    # then linearly interpolate. We do this for each TYA state 
+                    # EV_lo_k = Σ_r V_now[k, lo_a, p'_r]  (value at lower addiction bracket)
+                    # EV_hi_k = Σ_r V_now[k, hi_a, p'_r]  (value at upper addiction bracket)
                     EV_lo_1 = 0.0; EV_hi_1 = 0.0
                     EV_lo_2 = 0.0; EV_hi_2 = 0.0
                     EV_lo_3 = 0.0; EV_hi_3 = 0.0
                     EV_lo_4 = 0.0; EV_hi_4 = 0.0
 
-                    # Loop over Halton draws
+                    # Loop over Halton draws 
                     for r in 1:R
-
-                        # Pre-computed price transition brackets for (p_idx, r)
+                        # Get price transition brackets for draw r 
                         c_lo = p_cig_lo[p_idx, r]
                         c_hi = p_cig_hi[p_idx, r]
                         w_c  = p_cig_w[p_idx, r]
@@ -1770,20 +1913,19 @@ function solve_vfi(
                         e_hi = p_ecig_hi[p_idx, r]
                         w_e  = p_ecig_w[p_idx, r]
 
-                        # Combined price indices for bilinear interpolation
+                        # Map 2D price brackets to combined price state indices 
                         p_ll = (c_lo - 1) * N_P + e_lo
                         p_lh = (c_lo - 1) * N_P + e_hi
                         p_hl = (c_hi - 1) * N_P + e_lo
                         p_hh = (c_hi - 1) * N_P + e_hi
 
-                        # Bilinear weights
+                        # Compute bilinear interpolation weights in price space 
                         w_ll = (1 - w_c) * (1 - w_e)
                         w_lh = (1 - w_c) * w_e
                         w_hl = w_c * (1 - w_e)
                         w_hh = w_c * w_e
 
-                        # Bilinear interpolation of V_now over prices at each addiction bracket
-                        # for all 4 TYA states
+                        # Accumulate bilinearly interpolated V_now for all 4 TYA states 
                         EV_lo_1 += w_ll * V_now[1, lo_a, p_ll] +
                                    w_lh * V_now[1, lo_a, p_lh] +
                                    w_hl * V_now[1, lo_a, p_hl] +
@@ -1825,97 +1967,78 @@ function solve_vfi(
                                    w_hh * V_now[4, hi_a, p_hh]
                     end
 
-                    # Average over Halton draws and interpolate over addiction brackets
+                    # Combine Halton draws and addiction brackets into EV 
                     EV_next_1 = (1 - w_a) * (EV_lo_1 * inv_R) + w_a * (EV_hi_1 * inv_R)
                     EV_next_2 = (1 - w_a) * (EV_lo_2 * inv_R) + w_a * (EV_hi_2 * inv_R)
                     EV_next_3 = (1 - w_a) * (EV_lo_3 * inv_R) + w_a * (EV_hi_3 * inv_R)
                     EV_next_4 = (1 - w_a) * (EV_lo_4 * inv_R) + w_a * (EV_hi_4 * inv_R)
 
-                    # Integrate over TYA transitions using Π_tya and store choice-specific value
+                    # Integrate over TYA transitions and store V_choice = U + δ·EV -
                     for tya_idx in 1:N_TYA
-                        EV = Π_tya[tya_idx, 1] * EV_next_1 +
-                             Π_tya[tya_idx, 2] * EV_next_2 +
-                             Π_tya[tya_idx, 3] * EV_next_3 +
-                             Π_tya[tya_idx, 4] * EV_next_4
+                        EV = Π[tya_idx, 1] * EV_next_1 +
+                             Π[tya_idx, 2] * EV_next_2 +
+                             Π[tya_idx, 3] * EV_next_3 +
+                             Π[tya_idx, 4] * EV_next_4
                         V_choice[tya_idx, j_idx, a_idx, p_idx] = U[tya_idx, j_idx, a_idx, p_idx] + δ * EV
                     end
                 end
 
-                # Aggregate over alternatives via log-sum-exp for all 4 TYA states
+                # Aggregate over alternatives via logsumexp 
                 for tya_idx in 1:N_TYA
                     V_next[tya_idx, a_idx, p_idx] = logsumexp(@view V_choice[tya_idx, :, a_idx, p_idx])
                 end
             end
         end
 
-        # # Normalize V_next to prevent value function levels from growing unboundedly.
-        # # Choice probabilities only depend on V differences, so the level is irrelevant.
-        # # This normalization is applied BEFORE the convergence check so that I measure
-        # # the sup-norm of normalized values, avoiding false non-convergence.
+        # Normalize V_next to prevent value function levels from growing unboundedly.
+        # Choice probabilities only depend on V differences, so the level is irrelevant.
+        # This normalization is applied BEFORE the convergence check so that I measure
+        # the sup-norm of normalized values, avoiding false non-convergence.
         # V_ref = V_next[1, 1, 1]
         # V_next .-= V_ref
 
-        # Convergence check: sup norm across all states
+        # Convergence check 
+        # Sup-norm: max absolute difference between V_next and V_now across all states
         current_diff = maximum(abs.(V_next .- V_now))
 
-        # Update V_now for next iteration
+        # Jacobi update: replace V_now with V_next for the next iteration
         V_now .= V_next
 
-        # Log progress every 100 iterations (only when verbose)
+        # Print progress at iterations 1, 10, and every 100th iteration
         if verbose && (iter % 100 == 0 || iter == 1 || iter == 10)
-
-            # Get elapsed time for the current vfi 
             elapsed = time() - t_vfi
-
-            # Ratio gives the convergence rate. A stable ratio below 1.0
-            # means it's contracting. The closer to 0, the faster it's converging. If it's near 1.0 or above,
-            # convergence is stalling.
             ratio = prev_diff < Inf ? current_diff / prev_diff : NaN
-
-            # Print and log vfi message 
-            # sprintf stands for string print formatted. Essentially, just a formatted string. The @
-            # transforms code at compile time before running, making things faster 
-            # VFI iter can handle up to 9,999,999 without misaligned printing
-            # Sup-norm prints as scientific notation like 0.00034 as 3.4e-04
-            # Ratio prints up to four decimals
-            # Elapsed prints up to one decimal with a literal "s" afterwards for seconds  
             log_msg(@sprintf("    VFI iter %6d | sup-norm = %.6e | ratio = %.4f | elapsed = %.1fs",
                 iter, current_diff, ratio, elapsed))
         end
 
-        # Update the sup-norm
+        # Update sup-norm
         prev_diff = current_diff
 
-        # Check convergence
+        # Check if sup-norm is below tolerance ε
         if current_diff < ε
             if verbose
-
-                # Get elapsed time for the current vfi 
                 elapsed = time() - t_vfi
-
-                # Print and log vfi message
                 log_msg(@sprintf("    VFI converged in %d iterations (sup-norm = %.6e, %.1fs)", iter, current_diff, elapsed))
             end
-
-            # If converged, then break out of vfi loop 
             converged = true
             break
         end
 
-        # Report non-convergence
+        # Report if we hit the maximum number of iterations without converging
         if iter == max_iter
-
-            # Get elapsed time for the current vfi
             elapsed = time() - t_vfi
-
-            # Print and log vfi message
             log_msg(@sprintf("VFI did not converge after %d iterations (sup-norm = %.6e, %.1fs)", max_iter, current_diff, elapsed))
         end
     end
 
-    # Final policy recomputation at converged V_now.
-    recompute_choice_values_4tya!(
-        V_choice, V_now, U, Float64(δ), Π_tya,
+    # During the last VFI iteration, V_choice was computed using V_now from the
+    # *previous* iteration. But then V_now was updated to V_next. So V_choice is
+    # one iteration stale relative to the converged V_now. We recompute V_choice
+    # one final time using the converged V_now to ensure exact consistency.
+    # This uses the same Bellman equation: V_choice = U + δ · EV(V_now_converged).
+    recompute_choice_values!(
+        V_choice, V_now, U, δ, Π,
         N_J, N_A, N_P, N_Pcomb, inv_R,
         p_cig_lo, p_cig_hi, p_cig_w,
         p_ecig_lo, p_ecig_hi, p_ecig_w,
@@ -1935,7 +2058,7 @@ end
 
 """
 Solve the value function via value function iteration (VFI) for the sophisticated
-quasi-hyperbolic discounting case (4 TYA states with Π_tya transition matrix).
+quasi-hyperbolic discounting case.
 
 # Model
 A sophisticated agent has present bias β ∈ (0, 1] and knows their future selves
@@ -1959,11 +2082,11 @@ where:
   - a'(j, a) is the next-period addiction state from choosing j at addiction a,
     given by ã' = (1-ψ)·ã + ψ·n[j], interpolated onto the addiction grid
   - EV is the expected continuation value, integrating over stochastic price
-    transitions using R Halton draws (quasi-Monte Carlo)
+    transitions using R Halton draws 
 
 Note: V_d and V_e share the *same* EV term. The only difference is the discount
 factor applied to it (β·δ vs δ). This is because the continuation value V is
-what *will actually happen* — the sophisticated agent correctly predicts this.
+what *will actually happen* and the sophisticated agent correctly predicts this.
 
 # Continuation Value (Sophisticated Aggregation)
 The ex-ante state value V aggregates over alternatives using decision-utility
@@ -2023,28 +2146,11 @@ This ensures the returned V_decision is exactly consistent with the fixed point,
 rather than being one iteration stale (since V_d was last computed *before*
 the final V_now update).
 
-# Arguments
-- N_J:      Number of product alternatives (31)
-- N_A:      Number of addiction grid points (20)
-- N_P:      Number of price grid points per category (10)
-- N_Pcomb:  Number of combined price states, N_P² (100)
-- β:        Present bias parameter, β ∈ (0, 1]. β = 1 is standard exponential.
-- δ:        Monthly exponential discount factor (0.99)
-- U:        Pre-computed flow utility array, U[tya_idx, j, a_idx, p_idx]
-- a_lower:  Lower addiction bracket indices, a_lower[j, a_idx]
-- a_upper:  Upper addiction bracket indices, a_upper[j, a_idx]
-- a_weight: Addiction interpolation weights, a_weight[j, a_idx]
-- p_cig_lo/hi/w:  Cig price transition brackets/weights, [p_idx, r]
-- p_ecig_lo/hi/w: Ecig price transition brackets/weights, [p_idx, r]
-- ε:        Convergence tolerance for sup-norm (default 1e-4)
-- max_iter: Maximum VFI iterations (default 3000)
-- verbose:  Whether to print convergence diagnostics
-
-# Returns
-- V:          Converged ex-ante value function, V[tya_idx, a_idx, p_idx]
-- V_decision: Decision-utility choice values (βδ discounting), V_decision[tya_idx, j, a_idx, p_idx]
-- n_iter:     Number of iterations to convergence
-- converged:  Whether VFI converged within max_iter
+Returns
+    - V:          Converged ex-ante value function, V[tya_idx, a_idx, p_idx]
+    - V_decision: Decision-utility choice values (βδ discounting), V_decision[tya_idx, j, a_idx, p_idx]
+    - n_iter:     Number of iterations to convergence
+    - converged:  Whether VFI converged within max_iter
 """
 function solve_vfi_sophisticated(
     N_J::Integer,
@@ -2063,56 +2169,70 @@ function solve_vfi_sophisticated(
     p_ecig_lo::Matrix{Int},
     p_ecig_hi::Matrix{Int},
     p_ecig_w::Matrix{Float64},
-    Π_tya::Matrix{Float64};
+    Π::Matrix{Float64};
+    V_init::Union{Array{Float64, 3}, Nothing} = nothing,
     ε::Real = 1e-4,
     max_iter::Integer = 3000,
     verbose::Bool = true
 )
 
-    # 4-state TYA with transition matrix Π_tya
-    # State 1: No TYA, stable; State 2: No TYA, approaching
-    # State 3: TYA present, stable; State 4: TYA present, ending soon
+    # Number of TYA states (4-state with transition matrix Π) and Halton draws
     N_TYA = 4
-
-    # Number of Halton draws for quasi-Monte Carlo integration over price shocks.
-    # R draws are pre-simulated from the AR(1) price process with correlated shocks.
     R = size(p_cig_lo, 2)
 
-    # Pre-compute 1/R so we multiply instead of divide inside the hot loop
+    # Compute 1.0/R
+    # This is helpful because I need to average the continuation values over the R Halton draws
+    # and EV / R is more computationally expensive that EV * inv_R
     inv_R = 1.0 / R
 
     # Pre-compute β·δ — this is the discount factor applied in decision utility.
     # When β = 1, βδ = δ and V_d = V_e (sophisticated collapses to naive).
     βδ = β * δ
 
-    # Initialize all arrays to zero (fresh each solve — no warm-starting).
+    #############################
+    # VFI
+    #############################
+
+    # Initialize V_now from V_init (warm-start) or zeros (cold start).
+    # Always allocate via zeros first, then copyto! in-place to guarantee type stability.
     # V_now:  current iterate of the ex-ante value function V[tya, a, p]
     # V_next: next iterate of V, computed entirely from V_now each iteration
     # V_d:    decision utility V_d[tya, j, a, p] = U + βδ·EV (drives choice probs)
     # V_e:    experienced utility V_e[tya, j, a, p] = U + δ·EV (actual payoffs)
     V_now  = zeros(Float64, N_TYA, N_A, N_Pcomb)
+    if V_init !== nothing
+        copyto!(V_now, V_init)
+    end
     V_next = zeros(Float64, N_TYA, N_A, N_Pcomb)
     V_d    = zeros(Float64, N_TYA, N_J, N_A, N_Pcomb)
     V_e    = zeros(Float64, N_TYA, N_J, N_A, N_Pcomb)
 
+    # Initialize number of iterations
     n_iter = 0
+
+    # Initialize convergence
     converged = false
+
+    # Previous iterations sup-norm across all states
     prev_diff = Inf
 
-    # ==================== MAIN VFI LOOP ====================
-    # Jacobi iteration: compute V_next entirely from V_now, then swap.
-    # Safe for multithreading because V_now is read-only within each iteration.
+    # Time VFI 
     t_vfi = time()
     for iter in 1:max_iter
+
+        # Update iteration counter 
         n_iter = iter
 
-        # Parallelize over the N_Pcomb = 100 combined price states.
+        # Parallelize over combined price states.
         # Each thread writes to disjoint p_idx slices of V_next, V_d, V_e.
         Threads.@threads for p_idx in 1:N_Pcomb
+
+            # Loop over addiction states 
             @inbounds for a_idx in 1:N_A
+
+                # Loop over alternatives 
                 for j_idx in 1:N_J
 
-                    # ---- Step 1: Get addiction transition brackets for (j, a) ----
                     # When the agent in addiction state a_idx chooses alternative j_idx,
                     # next-period addiction is ã' = (1-ψ)·ã + ψ·n[j]. This generally
                     # falls between two grid points. lo_a and hi_a are the bracketing
@@ -2121,7 +2241,6 @@ function solve_vfi_sophisticated(
                     hi_a = a_upper[j_idx, a_idx]
                     w_a  = a_weight[j_idx, a_idx]
 
-                    # ---- Step 2: Accumulate EV over Halton draws at each addiction bracket ----
                     # We need EV at the low and high addiction brackets separately,
                     # then linearly interpolate. We do this for each TYA state (1-4).
                     # EV_lo_k = Σ_r V_now[k, lo_a, p'_r]  (value at lower addiction bracket)
@@ -2131,8 +2250,9 @@ function solve_vfi_sophisticated(
                     EV_lo_3 = 0.0; EV_hi_3 = 0.0
                     EV_lo_4 = 0.0; EV_hi_4 = 0.0
 
+                    # Loop over Halton draws 
                     for r in 1:R
-                        # ---- Step 2a: Get price transition brackets for draw r ----
+                        # Get price transition brackets for draw r 
                         c_lo = p_cig_lo[p_idx, r]
                         c_hi = p_cig_hi[p_idx, r]
                         w_c  = p_cig_w[p_idx, r]
@@ -2140,19 +2260,19 @@ function solve_vfi_sophisticated(
                         e_hi = p_ecig_hi[p_idx, r]
                         w_e  = p_ecig_w[p_idx, r]
 
-                        # ---- Step 2b: Map 2D price brackets to combined price state indices ----
+                        # Map 2D price brackets to combined price state indices
                         p_ll = (c_lo - 1) * N_P + e_lo
                         p_lh = (c_lo - 1) * N_P + e_hi
                         p_hl = (c_hi - 1) * N_P + e_lo
                         p_hh = (c_hi - 1) * N_P + e_hi
 
-                        # ---- Step 2c: Compute bilinear interpolation weights in price space ----
+                        # Compute bilinear interpolation weights in price space 
                         w_ll = (1 - w_c) * (1 - w_e)
                         w_lh = (1 - w_c) * w_e
                         w_hl = w_c * (1 - w_e)
                         w_hh = w_c * w_e
 
-                        # ---- Step 2d: Accumulate bilinearly interpolated V_now for all 4 TYA states ----
+                        # Accumulate bilinearly interpolated V_now for all 4 TYA states 
                         EV_lo_1 += w_ll * V_now[1, lo_a, p_ll] +
                                    w_lh * V_now[1, lo_a, p_lh] +
                                    w_hl * V_now[1, lo_a, p_hl] +
@@ -2194,29 +2314,29 @@ function solve_vfi_sophisticated(
                                    w_hh * V_now[4, hi_a, p_hh]
                     end
 
-                    # ---- Step 3: Combine Halton draws and addiction brackets into EV ----
+                    # Combine Halton draws and addiction brackets into EV 
                     EV_next_1 = (1 - w_a) * (EV_lo_1 * inv_R) + w_a * (EV_hi_1 * inv_R)
                     EV_next_2 = (1 - w_a) * (EV_lo_2 * inv_R) + w_a * (EV_hi_2 * inv_R)
                     EV_next_3 = (1 - w_a) * (EV_lo_3 * inv_R) + w_a * (EV_hi_3 * inv_R)
                     EV_next_4 = (1 - w_a) * (EV_lo_4 * inv_R) + w_a * (EV_hi_4 * inv_R)
 
-                    # ---- Step 4: Integrate over TYA transitions and compute V_d, V_e ----
+                    # Integrate over TYA transitions and compute V_d, V_e 
                     for tya_idx in 1:N_TYA
-                        EV = Π_tya[tya_idx, 1] * EV_next_1 +
-                             Π_tya[tya_idx, 2] * EV_next_2 +
-                             Π_tya[tya_idx, 3] * EV_next_3 +
-                             Π_tya[tya_idx, 4] * EV_next_4
+                        EV = Π[tya_idx, 1] * EV_next_1 +
+                             Π[tya_idx, 2] * EV_next_2 +
+                             Π[tya_idx, 3] * EV_next_3 +
+                             Π[tya_idx, 4] * EV_next_4
                         V_d[tya_idx, j_idx, a_idx, p_idx] = U[tya_idx, j_idx, a_idx, p_idx] + βδ * EV
                         V_e[tya_idx, j_idx, a_idx, p_idx] = U[tya_idx, j_idx, a_idx, p_idx] + δ * EV
                     end
                 end
 
-                # ---- Step 5: Aggregate into ex-ante value V_next ----
+                # Aggregate into ex-ante value V_next 
                 # For each TYA state at this (a, p), compute the sophisticated continuation
                 # value from the choice-specific V_d and V_e computed above.
                 for tya_idx in 1:N_TYA
 
-                    # ---- Step 5a: Compute choice probabilities from V_d (stable softmax) ----
+                    # Compute choice probabilities from V_d 
                     # Find max of V_d across alternatives for numerical stability.
                     # Without subtracting the max, exp(V_d) can overflow for large values.
                     vd_max = V_d[tya_idx, 1, a_idx, p_idx]
@@ -2235,7 +2355,7 @@ function solve_vfi_sophisticated(
                     end
                     log_denom = log(sum_exp)
 
-                    # ---- Step 5b: Compute the sophisticated aggregator ----
+                    # Compute the sophisticated aggregator 
                     # V_next[tya, a, p] = Σ_j p_j · V_e_j + H(p)
                     # where p_j = softmax(V_d)_j and H(p) = -Σ_j p_j · log(p_j).
                     #
@@ -2250,6 +2370,15 @@ function solve_vfi_sophisticated(
                     agg = 0.0
                     for j in 1:N_J
                         log_pj = V_d[tya_idx, j, a_idx, p_idx] - vd_max - log_denom
+
+                        # Skip alternatives with zero choice probability (e.g., banned
+                        # alternatives with U = -Inf). Without this guard, pj = exp(-Inf)
+                        # = 0.0 and V_e = -Inf, giving 0.0 * (-Inf) = NaN (IEEE 754),
+                        # which would poison the entire value function.
+                        if log_pj == -Inf
+                            continue
+                        end
+
                         pj = exp(log_pj)
                         # p_j · V_e_j + p_j · (-log(p_j))  =  p_j · V_e_j - p_j · log(p_j)
                         agg += pj * V_e[tya_idx, j, a_idx, p_idx] - pj * log_pj
@@ -2259,7 +2388,6 @@ function solve_vfi_sophisticated(
             end
         end
 
-        # ---- Convergence check ----
         # Sup-norm: max absolute difference between V_next and V_now across all states
         current_diff = maximum(abs.(V_next .- V_now))
 
@@ -2274,6 +2402,7 @@ function solve_vfi_sophisticated(
                 iter, current_diff, ratio, elapsed))
         end
 
+        # Update sup-norm
         prev_diff = current_diff
 
         # Check if sup-norm is below tolerance ε
@@ -2281,6 +2410,7 @@ function solve_vfi_sophisticated(
             if verbose
                 elapsed = time() - t_vfi
                 log_msg(@sprintf("    VFI converged in %d iterations (sup-norm = %.6e, %.1fs)", iter, current_diff, elapsed))
+                log_msg("")
             end
             converged = true
             break
@@ -2293,14 +2423,13 @@ function solve_vfi_sophisticated(
         end
     end
 
-    # ---- Post-convergence: recompute V_d at the fixed point ----
     # During the last VFI iteration, V_d was computed using V_now from the
     # *previous* iteration. But then V_now was updated to V_next. So V_d is
     # one iteration stale relative to the converged V_now. We recompute V_d
     # one final time using the converged V_now to ensure exact consistency.
     # This uses the same Bellman equation: V_d = U + βδ · EV(V_now_converged).
-    recompute_choice_values_4tya!(
-        V_d, V_now, U, Float64(βδ), Π_tya,
+    recompute_choice_values!(
+        V_d, V_now, U, Float64(βδ), Π,
         N_J, N_A, N_P, N_Pcomb, inv_R,
         p_cig_lo, p_cig_hi, p_cig_w,
         p_ecig_lo, p_ecig_hi, p_ecig_w,
@@ -2341,13 +2470,13 @@ function interpolate_v_choice(
     P::AbstractMatrix{<:Real}
 )
 
+    # Number of addiction grid points
     N_A = length(A)
 
     # 1D price grids
     P_cig  = @view P[:, 1]
     P_ecig = @view P[:, 2]
-
-    # --- Addiction interpolation brackets ---
+ 
     # Clamp continuous addiction to grid bounds
     a_i = clamp(a, A[1], A[end])
 
@@ -2358,7 +2487,6 @@ function interpolate_v_choice(
     # Interpolation weight for addiction
     w_a = (lo_a == hi_a) ? 0.0 : (a_i - A[lo_a]) / (A[hi_a] - A[lo_a])
 
-    # --- Price interpolation brackets ---
     # Clamp continuous prices to grid bounds
     cig_clamped  = clamp(obs_cig, P_cig[1], P_cig[end])
     ecig_clamped = clamp(obs_ecig, P_ecig[1], P_ecig[end])
@@ -2385,7 +2513,7 @@ function interpolate_v_choice(
     w_hl = w_c * (1 - w_e)
     w_hh = w_c * w_e
 
-    # --- Trilinear interpolation for all alternatives ---
+    # Trilinear interpolation for all alternatives
     v_interp = Vector{Float64}(undef, N_J)
 
     for j in 1:N_J
@@ -2418,8 +2546,7 @@ Under the Type I extreme value (logit) assumption, the log conditional
 choice probability for observation i choosing alternative y_i is:
 
   log P(y_i | x_i; θ) = log(exp(V_choice[tya_i, y_i, a_i, p_i]) / Σ_j exp(V_choice[tya_i, j, a_i, p_i]))
-                      = V_choice[tya_i, y_i, a_i, p_i]
-                        - log(Σ_j exp(V_choice[tya_i, j, a_i, p_i]))
+                      = V_choice[tya_i, y_i, a_i, p_i] - log(Σ_j exp(V_choice[tya_i, j, a_i, p_i]))
 
 where V_choice is on the discretized state grid. Since the observed
 addiction level and prices are continuous, I interpolate V_choice:
@@ -2480,6 +2607,25 @@ This is the standard method for sampling from a discrete distribution:
   1. Draw u ~ Uniform(0, 1)
   2. Return the smallest j such that F(j) = Σ_{k=1}^{j} probs[k] ≥ u
 
+For instance, say I have 3 alternatives with probabilities [0.2, 0.5, 0.3]. The CDF
+partitions the unit interval into:
+
+  |---0.2---|------0.5------|---0.3---|
+  0        0.2             0.7        1.0
+    j = 1        j = 2        j = 3
+
+The function draws a uniform random number u and walks left to right,
+accumulating probabilities. Whichever interval u lands in determines the choice:
+
+  - u = 0.15 → cumulative hits 0.2 at j=1, and 0.15 ≤ 0.2, so return j=1
+  - u = 0.45 → cumulative passes 0.2 (skip), hits 0.7 at j=2, and 0.45 ≤ 0.7, so return j=2
+  - u = 0.85 → cumulative passes 0.2 and 0.7 (skip both), hits 1.0 at j=3, so return j=3
+
+Each alternative is chosen with probability equal to its interval width, which
+is exactly probs[j]. The fallback `return length(probs)` at the end handles
+the edge case where floating-point rounding makes the probabilities sum to
+0.9999... instead of exactly 1.0, so u could slightly exceed the accumulated sum.
+
 Used by:
   - MC simulation (simulate_data): after computing logit choice probabilities
     from interpolated V_decision_true, draws each household's simulated
@@ -2509,7 +2655,7 @@ function categorical_sample(
         end
     end
 
-    # Fallback: if floating-point rounding causes Σ probs < 1 so that
+    # If floating-point rounding causes Σ probs < 1 so that
     # u exceeds the accumulated sum, return the last category. This
     # can happen when probs doesn't sum to exactly 1.0 due to
     # finite-precision arithmetic in the softmax computation.
@@ -2522,12 +2668,27 @@ end
 #     Objective
 #############################
 
-# --- Parameter Bounds ---
 
 # Economic parameter bounds (standardized units).
-# Ordering: α_T, α_E, α_TE, λ_1, λ_2, λ_3, λ_4, μ, γ, ω, ξ_T, ξ_E, ξ_TE
-const θ_lower_bound = Float64[-Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf,    0, -Inf, -Inf, -Inf, -Inf, -Inf]
-const θ_upper_bound = Float64[ Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,    0,    0,  Inf,  Inf,  Inf]
+# Base ordering: α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ, μ, ω, ξ_C, ξ_E, ξ_CE
+# When ESTIMATE_PSI = true, ψ is appended after the 13 structural parameters (ψ ∈ [0.01, 1.00]).
+# When ESTIMATE_BETA = true, β is appended as the last element (β ∈ [0.01, 1.00]).
+# When both are true: [13 structural, ψ, β].
+_base_lower = Float64[-Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf]
+_base_upper = Float64[ Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf]
+if ESTIMATE_PSI && ESTIMATE_BETA
+    θ_lower_bound = vcat(_base_lower, [0.01, 0.01])
+    θ_upper_bound = vcat(_base_upper, [1.00, 1.00])
+elseif ESTIMATE_PSI
+    θ_lower_bound = vcat(_base_lower, [0.01])
+    θ_upper_bound = vcat(_base_upper, [1.00])
+elseif ESTIMATE_BETA
+    θ_lower_bound = vcat(_base_lower, [0.01])
+    θ_upper_bound = vcat(_base_upper, [1.00])
+else
+    θ_lower_bound = _base_lower
+    θ_upper_bound = _base_upper
+end
 
 """
 Check whether θ_vec satisfies the economic parameter bounds.
@@ -2566,8 +2727,6 @@ function check_parameter_bounds(
     return isempty(violated), join(violated, ", ")
 end
 
-
-# --- Nelder-Mead Simplex ---
 
 """
 Nelder-Mead operates on a simplex in D-dimensional parameter space.
@@ -2630,8 +2789,6 @@ function Optim.simplexer(
 end
 
 
-# --- Random Amoeba Optimizer ---
-
 """
 Modified Nelder-Mead optimizer with random restarts.
 
@@ -2676,7 +2833,9 @@ function random_amoeba(
     N_params = length(param)
 
     # Names of the parameters
-    pnames = collect(String, string.(keys(starting_param)))
+    pnames = replace.(collect(String, string.(keys(starting_param))),
+        "α" => "alpha", "λ" => "lambda", "γ" => "gamma",
+        "μ" => "mu", "ω" => "omega", "ξ" => "xi")
 
     # Initialize global best objective to a very large value
     overall_min = Inf
@@ -2714,9 +2873,10 @@ function random_amoeba(
     log_msg("\n" * "="^60)
     log_msg("RANDOM AMOEBA OPTIMIZATION")
     log_msg("="^60)
+    log_msg("")
     log_msg("Starting parameters:")
     for d in 1:N_params
-        log_msg("  $(pnames[d]) = $(base_param[d])")
+        log_msg(@sprintf("  %s = %.4f", pnames[d], base_param[d]))
     end
     log_msg("")
 
@@ -2729,8 +2889,10 @@ function random_amoeba(
         # Time the current outer try
         t_outer = time()
 
-        # Reset simplex deviations to the base values at the start of each outer try
-        this_add = add
+        # Reset simplex deviations to a copy of the base values at the start of each
+        # outer try. Using copy() prevents in-place mutations of this_add from
+        # accidentally corrupting the original add vector.
+        this_add = copy(add)
 
         # Print and log message indicating current outer try 
         log_msg("\n" * "-"^60)
@@ -2759,6 +2921,7 @@ function random_amoeba(
             # Print and log message regarding current minimization run 
             log_msg("\n  Minimization run $l.$m")
             log_msg("  " * "-"^22)
+            log_msg("")
 
             # Run Nelder-Mead for a limited number of iterations (inner_iter iterations)
             # Note, each iteration can call the objective many times. 
@@ -2921,14 +3084,14 @@ function random_amoeba(
     log_msg("")
 
     # Reconstruct named tuple with the same keys as starting_param
-    # E.g., (α_T = 0.5, α_E = 0.2, ...)
+    # E.g., (α_C = 0.5, α_E = 0.2, ...)
     opt_param = (; zip(keys(starting_param), best_param)...)
 
     return opt_param, overall_min
 end
 
 
-# --- Objective Function ---
+# Objective Function 
 
 """
 Objective function for the optimizer.
@@ -2941,22 +3104,27 @@ Increments `est_eval_count` and times each evaluation. **Box constraints:**
 returns `1e14` penalty if any parameter violates bounds via `check_parameter_bounds`.
 
 For each candidate θ:
-  (1) computes addiction grid 
-  (2) computes flow utility U 
-  (3) computes addiction transition brackets 
-  (4) solves VFI from scratch
+  (1) extracts β and/or ψ from θ_vec when ESTIMATE_BETA / ESTIMATE_PSI are true
+  (2) when ESTIMATE_PSI, recomputes addiction transitions and trajectories at candidate ψ
+  (3) computes flow utility U
+  (4) solves VFI using addiction transitions (pre-computed or recomputed)
         **Early-exit:** if VFI did not converge, logs a PENALTY message and returns `1e14`.
         Otherwise:
-  (5) computes addiction trajectories at fixed ψ
-  (6) evaluates log-likelihood via trilinear interpolation
-  (7) logs eval number, LL, VFI iters, elapsed time, and θ vector
+  (5) evaluates log-likelihood via trilinear interpolation
+  (6) logs eval number, LL, VFI iters, elapsed time, and θ vector
 
 Accesses global data loaded by 02_Estimation.jl (e.g., N_J, y, etc.)
 so each data does not need to be passed as arguments.
+
+Pre-computed addiction globals (set by 02_Estimation.jl, used when ESTIMATE_PSI = false):
+  N_A, A                                    — addiction grid (existing globals)
+  a_lower_fixed, a_upper_fixed, a_weight_fixed — addiction transition brackets
+  a_continuous_fixed                         — continuous addiction trajectories
+When ESTIMATE_PSI = true, these are recomputed at the candidate ψ each evaluation.
 """
 function objective(θ_vec::AbstractVector{<:Real})
 
-    # Use global evaluation counter 
+    # Use global evaluation counter
     global est_eval_count
 
     # Start evaluation time
@@ -2965,46 +3133,111 @@ function objective(θ_vec::AbstractVector{<:Real})
     # Update evaluation count
     est_eval_count += 1
 
-    # Economic parameter bounds check 
+    # Economic parameter bounds check
+    # If any parameter falls outside their respective bounds, return penalty (very large number for LL)
     in_bounds, violations = check_parameter_bounds(θ_vec, est_param_names)
     if !in_bounds
+        
+        # Get elapsed time
         elapsed = time() - t_eval
+
+        # Print and log message
         log_msg("")
         log_msg(@sprintf("  Eval %d | PENALTY (bounds: %s) | time = %.1fs",
             est_eval_count, violations, elapsed))
         log_msg("")
+
         return 1e14
     end
 
-    # ψ is global from get_fixed_parameters()
-    N_A_current, A_current = get_addiction_space(ψ)
+    # Extract β and ψ from θ_vec based on which flags are active.
+    # Parameter ordering: [13 structural, ψ (if ESTIMATE_PSI), β (if ESTIMATE_BETA)]
+    if ESTIMATE_BETA && ESTIMATE_PSI
+        β_current = θ_vec[end]
+        ψ_current = θ_vec[end-1]
+        θ_struct = θ_vec[1:end-2]
+    elseif ESTIMATE_BETA
+        β_current = θ_vec[end]
+        ψ_current = ψ
+        θ_struct = θ_vec[1:end-1]
+    elseif ESTIMATE_PSI
+        ψ_current = θ_vec[end]
+        β_current = β
+        θ_struct = θ_vec[1:end-1]
+    else
+        β_current = β
+        ψ_current = ψ
+        θ_struct = θ_vec
+    end
 
-    # Compute flow utility for the current θ
+    # When ESTIMATE_PSI = true, recompute addiction objects at the candidate ψ.
+    # These shadow the pre-computed globals (a_lower_fixed, etc.) from 02_Estimation.jl.
+    if ESTIMATE_PSI
+        N_A_cur, A_cur = get_addiction_space(ψ_current)
+        a_lower_cur, a_upper_cur, a_weight_cur = precompute_addiction_transitions(N_J, N_A_cur, ψ_current, A_cur, n)
+        a0_cur, _ = get_initial_addiction_stock(ψ_current, A_cur, n, y, hh_codes)
+        _, a_continuous_cur = simulate_addiction_trajectories(N_A_cur, ψ_current, A_cur, n, y, hh_codes, a0_cur)
+    else
+        N_A_cur = N_A
+        A_cur = A
+        a_lower_cur = a_lower_fixed
+        a_upper_cur = a_upper_fixed
+        a_weight_cur = a_weight_fixed
+        a_continuous_cur = a_continuous_fixed
+    end
+
+    # Compute flow utility for the current θ (structural parameters only, excludes β and ψ)
     U_current = get_flow_utility(
-        θ_vec, N_J, N_A_current, N_Pcomb, A_current, c_cig, c_ecig, c_bundle, n, is_non_fda_flavored, is_fda_flavored, cat_idx, E
+        θ_struct, N_J, N_A_cur, N_Pcomb, A_cur, q_cig, q_ecig, q_bundle, n, is_flavored, is_fda_flavored, cat_idx, E
     )
 
-    # Compute addiction transition brackets 
-    a_lower_current, a_upper_current, a_weight_current = precompute_addiction_transitions(
-        N_J, N_A_current, ψ, A_current, n
-    )
+    # Warm-start: reuse the previous V as initial guess within a NM run.
+    # Reset V_warm when the optimizer phase changes (new outer try, inner run, or long run).
+    if WARM_START
 
-    # Solve VFI with Π_tya (4-state TYA transition matrix, accessed as global)
+        # Access global value function
+        global V_warm_est, last_ra_phase_est
+
+        # Get current outer and inner try
+        current_phase = (ra_outer_try, ra_inner_run)
+
+        # If the outer and inner runs are different than before
+        if current_phase != last_ra_phase_est
+
+            # Reset the value function
+            V_warm_est = nothing
+
+            # Update the outer and inner run
+            last_ra_phase_est = current_phase
+        end
+
+        # Update the value function
+        V_init_current = V_warm_est
+    else
+
+        # If not doing warm start, then set to nothing
+        V_init_current = nothing
+    end
+
+    # VFI
+    # When ESTIMATE_PSI = false, a_lower_cur etc. are the pre-computed globals from 02_Estimation.jl.
+    # When ESTIMATE_PSI = true, they are recomputed above at the candidate ψ.
     V, V_decision_current, vfi_iters, vfi_converged = solve_vfi_sophisticated(
-        N_J, N_A_current, N_P, N_Pcomb, β, δ, U_current,
-        a_lower_current, a_upper_current, a_weight_current,
+        N_J, N_A_cur, N_P, N_Pcomb, β_current, δ, U_current,
+        a_lower_cur, a_upper_cur, a_weight_cur,
         p_cig_lo, p_cig_hi, p_cig_w,
         p_ecig_lo, p_ecig_hi, p_ecig_w,
-        Π_tya
+        Π;
+        V_init = V_init_current
     )
 
     # If VFI did not converge, skip LL and return penalty (very large number for LL)
     if !vfi_converged
 
-        # Get elapsed time 
+        # Get elapsed time
         elapsed = time() - t_eval
 
-        # Print and log message about VFI not converging 
+        # Print and log message about VFI not converging
         log_msg("")
         log_msg(@sprintf("  Eval %d | PENALTY (VFI not converged) | VFI iters = %d | time = %.1fs",
             est_eval_count, vfi_iters, elapsed))
@@ -3021,13 +3254,15 @@ function objective(θ_vec::AbstractVector{<:Real})
         return 1e14
     end
 
-    # Compute addiction trajectories 
-    a0_current, _ = get_initial_addiction_stock(ψ, A_current, n, y, hh_codes)
-    _, a_continuous_current = simulate_addiction_trajectories(N_A_current, ψ, A_current, n, y, hh_codes, a0_current)
+    # Store converged V for warm-starting the next evaluation within this NM run.
+    # Only store when VFI converged — unconverged V (penalty case) is not stored.
+    if WARM_START
+        V_warm_est = V
+    end
 
     # Compute log-likelihood via trilinear interpolation at continuous states
     LL = log_likelihood(
-        V_decision_current, N_J, N_P, A_current, P, y, tya_state, a_continuous_current, p_continuous
+        V_decision_current, N_J, N_P, A_cur, P, y, tya_state, a_continuous_cur, p_continuous
     )
 
     # Get elapsed time 

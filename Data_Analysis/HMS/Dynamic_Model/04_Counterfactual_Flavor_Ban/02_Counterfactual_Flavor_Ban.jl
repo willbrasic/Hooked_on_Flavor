@@ -10,7 +10,7 @@
 # choice set by setting their flow utility to -Inf.
 #
 # The script:
-#   1. Loads estimated parameters θ_hat from Dynamic_Model_Estimates.csv
+#   1. Loads estimated parameters θ_hat from Dynamic_Model_<beta_tag>_Estimates.csv
 #   2. Solves VFI under the status quo (all 40 alternatives available)
 #   3. Solves VFI under the flavor ban (flavored alternatives removed)
 #   4. Computes pointwise choice probabilities and welfare at all observed
@@ -29,8 +29,17 @@
 # Preliminaries
 #############################
 
+# Base model: β is fixed at 1.0 (not estimated)
+ESTIMATE_BETA = false
+
+# Base model: ψ is fixed at 0.68 (not estimated)
+ESTIMATE_PSI = false
+
 # Whether we are running on the HPC or not
 hpc = true
+
+# Load Random for common random number seeding in forward simulations
+using Random
 
 # Set output path and working directory
 if hpc
@@ -41,8 +50,13 @@ if hpc
     # Load counterfactual-specific functions
     include("01_Counterfactual_Functions.jl")
 
+    # Construct psi and beta tags for directory and file naming
+    ψ_naming, β_naming, _ = get_fixed_parameters()
+    psi_tag = ESTIMATE_PSI ? "Psi_Estimated" : "Psi_$(ψ_naming)"
+    beta_tag = ESTIMATE_BETA ? "Beta_Estimated" : "Beta_$(β_naming)"
+
     # Output path for results (use absolute path so it's unaffected by later cd)
-    output_dir = abspath("./Counterfactual_Results")
+    output_dir = abspath("./Counterfactual_$(psi_tag)_$(beta_tag)_Results")
 
     # Create output directory if it doesn't exist
     mkpath(output_dir)
@@ -57,8 +71,13 @@ else
     # Load counterfactual-specific functions
     include("01_Counterfactual_Functions.jl")
 
-    # Output path for results
-    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Counterfactual_Results"
+    # Construct psi and beta tags for directory and file naming
+    ψ_naming, β_naming, _ = get_fixed_parameters()
+    psi_tag = ESTIMATE_PSI ? "Psi_Estimated" : "Psi_$(ψ_naming)"
+    beta_tag = ESTIMATE_BETA ? "Beta_Estimated" : "Beta_$(β_naming)"
+
+    # Output path for results (includes psi and beta tags in directory name)
+    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Counterfactual_$(psi_tag)_$(beta_tag)_Results"
 
     # Create output directory if it doesn't exist
     mkpath(output_dir)
@@ -87,7 +106,7 @@ log_msg("Counterfactual simulation started at $(Dates.format(now(), "yyyy-mm-dd 
 #############################
 
 # Load fixed parameters:
-#   ψ = addiction decay rate (fixed from reduced-form AR(1) estimate)
+#   ψ = addiction decay rate (fixed at 0.68; overridden when ESTIMATE_PSI = true)
 #   β = present bias (fixed at 1.0; exponential discounting in the base model)
 #   δ = monthly discount factor (fixed at 0.99)
 ψ, β, δ = get_fixed_parameters();
@@ -121,9 +140,9 @@ N_K, _ = get_category_choices();
 #############################
 
 # Get consumption vectors by alternative (STANDARDIZED by max)
-# c_bundle is standardized by its own max (not c_cig_max × c_ecig_max) for reasonable α_TE scaling
+# q_bundle is standardized by its own max (not q_cig_max × q_ecig_max) for reasonable α_CE scaling
 # Max values are needed for rescaling parameter estimates to original units
-N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, _, c_cig, c_ecig, c_bundle, c_cig_max, c_ecig_max, c_bundle_max = get_consumption(N_J);
+N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, _, q_cig, q_ecig, q_bundle, q_cig_max, q_ecig_max, q_bundle_max = get_consumption(N_J);
 
 # Get nicotine vector by alternative (STANDARDIZED by max)
 # n_max is the raw max value for rescaling estimates
@@ -132,8 +151,8 @@ n, n_max = get_nicotine(N_J);
 # Get category index by alternative
 cat_idx = get_category_index(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig);
 
-# Get non-FDA flavored indicator by alternative: is_non_fda_flavored[j] ∈ {0, 1}
-is_non_fda_flavored = get_non_fda_flavored_indicator(cat_idx);
+# Get flavored indicator by alternative: is_flavored[j] ∈ {true, false} (any flavored: non-FDA or FDA)
+is_flavored = get_flavored_indicator(cat_idx);
 
 # Get FDA flavored indicator by alternative: is_fda_flavored[j] ∈ {0, 1}
 is_fda_flavored = get_fda_flavored_indicator(cat_idx);
@@ -148,9 +167,9 @@ is_fda_flavored = get_fda_flavored_indicator(cat_idx);
 # State 3: TYA present, stable; State 4: TYA present, ending soon
 tya_state = get_tya_states();
 
-# Load 4×4 monthly TYA transition matrix Π_tya[s, s'] = P(TYA' = s' | TYA = s)
+# Load 4×4 monthly TYA transition matrix Π[s, s'] = P(TYA' = s' | TYA = s)
 # Used in VFI to integrate over anticipated TYA state changes
-Π_tya = get_tya_transitions();
+Π = get_tya_transitions();
 
 
 #############################
@@ -164,11 +183,11 @@ N_P, P = get_pricing_spaces();
 N_Pcomb, Pcomb = get_pricing_spaces_combination(N_K, N_P, P);
 
 # Get price ratios for quantity discount adjustment (price per unit varies by bin size)
-ratio_cig, ratio_ecig = get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, c_cig, c_ecig);
+ratio_cig, ratio_ecig = get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, q_cig, q_ecig);
 
-# Get expenditure matrix E[p, j] = p_cig(p) * c_cig[j] + p_ecig(p) * c_ecig[j]
+# Get expenditure matrix E[p, j] = p_cig(p) * q_cig[j] + p_ecig(p) * q_ecig[j]
 # STANDARDIZED by E_max; E_max is the raw max value for rescaling estimates
-E, E_max = get_expenditures(N_J, N_Pcomb, c_cig, c_ecig, c_cig_max, c_ecig_max, Pcomb, ratio_cig, ratio_ecig);
+E, E_max = get_expenditures(N_J, N_Pcomb, q_cig, q_ecig, q_cig_max, q_ecig_max, Pcomb, ratio_cig, ratio_ecig);
 
 # Get Halton draw price transitions: T[m, r, k] where m = price state, r = draw, k = category
 T = get_transitions(N_K);
@@ -217,16 +236,15 @@ log_msg("AR(1) parameters loaded")
 # Load Estimated Parameters
 #############################
 
-# Results directory where Dynamic_Model_Estimates.csv is stored
-# After cd to Data/, the results directory is one level up at ../Dynamic_Model_Results
+# Results directory where estimated parameters are stored (includes psi and beta tags in directory name)
 if hpc
-    estimates_dir = abspath("../Dynamic_Model_Results")
+    estimates_dir = abspath("../Dynamic_Model_$(psi_tag)_$(beta_tag)_Results")
 else
-    estimates_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Results"
+    estimates_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_$(psi_tag)_$(beta_tag)_Results"
 end
 
-# Read θ_hat from the estimates file produced by 02_Estimation.jl
-estimates_path = joinpath(estimates_dir, "Dynamic_Model_Estimates.csv");
+# Read θ_hat from the estimates file produced by 02_Estimation.jl (includes psi and beta tags in filename)
+estimates_path = joinpath(estimates_dir, "Dynamic_Model_$(psi_tag)_$(beta_tag)_Estimates.csv");
 df_est = CSV.read(estimates_path, DataFrame);
 
 # Extract parameter names and values
@@ -329,7 +347,7 @@ t_vfi_sq = time();
 
 # Compute flow utility at θ_hat
 U_sq = get_flow_utility(
-    θ_hat, N_J, N_A, N_Pcomb, A, c_cig, c_ecig, c_bundle, n, is_non_fda_flavored, is_fda_flavored, cat_idx, E
+    θ_hat, N_J, N_A, N_Pcomb, A, q_cig, q_ecig, q_bundle, n, is_flavored, is_fda_flavored, cat_idx, E
 )
 
 # Solve VFI
@@ -338,7 +356,7 @@ _, V_choice_sq, vfi_iters_sq, vfi_converged_sq = solve_vfi_sophisticated(
     a_lower, a_upper, a_weight,
     p_cig_lo, p_cig_hi, p_cig_w,
     p_ecig_lo, p_ecig_hi, p_ecig_w,
-    Π_tya
+    Π
 )
 
 # Print and log status quo VFI result
@@ -371,7 +389,7 @@ _, V_choice_ban, vfi_iters_ban, vfi_converged_ban = solve_vfi_sophisticated(
     a_lower, a_upper, a_weight,
     p_cig_lo, p_cig_hi, p_cig_w,
     p_ecig_lo, p_ecig_hi, p_ecig_w,
-    Π_tya
+    Π
 )
 
 # Print and log flavor ban VFI result
@@ -481,8 +499,15 @@ N_draws = 100   # Monte Carlo draws per household
 
 log_msg("T_sim = $T_sim, N_draws = $N_draws, N_HH = $N_HH")
 
+# Use common random numbers (CRN) for status quo and ban simulations.
+# By seeding the RNG identically before each simulation, both scenarios
+# see the same price shock sequences and choice draws, reducing variance
+# of the welfare difference.
+crn_seed = 12345
+
 # Simulate under status quo
 log_msg("\nSimulating status quo trajectories...")
+Random.seed!(crn_seed)
 t_sim_sq = time();
 sim_choices_sq, sim_addiction_sq, sim_welfare_sq = simulate_trajectories(
     V_choice_sq, hh_tya, hh_a0, hh_p0, T_sim, N_draws, ψ,
@@ -491,8 +516,9 @@ sim_choices_sq, sim_addiction_sq, sim_welfare_sq = simulate_trajectories(
 sim_sq_elapsed = time() - t_sim_sq;
 log_msg("Status quo simulation: $(round(sim_sq_elapsed, digits=1))s")
 
-# Simulate under flavor ban
+# Simulate under flavor ban (reset seed for CRN — same draws as status quo)
 log_msg("Simulating flavor ban trajectories...")
+Random.seed!(crn_seed)
 t_sim_ban = time();
 sim_choices_ban, sim_addiction_ban, sim_welfare_ban = simulate_trajectories(
     V_choice_ban, hh_tya, hh_a0, hh_p0, T_sim, N_draws, ψ,

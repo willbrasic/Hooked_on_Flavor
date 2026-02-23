@@ -73,8 +73,11 @@ dt_category_choices <- dt[, .(
   cig_ecig
 )]
 
-# Check all rows sum to 1
-all(rowSums(dt_category_choices, na.rm = TRUE) == 1)
+# Check no NA values exist in the choice indicators
+stopifnot("NA values found in category choice indicators" = !any(is.na(dt_category_choices)))
+
+# Check all rows sum to 1 (exactly one category chosen per household-month)
+all(rowSums(dt_category_choices) == 1)
 
 # Write the data to a file
 file_name <- "../Dynamic_Model/Data/Category_Choices.csv"
@@ -194,8 +197,11 @@ data.table(
   fraction = colMeans(dt_product_choices)
 )[order(-fraction)]
 
+# Check no NA values exist in the product choice indicators
+stopifnot("NA values found in product choice indicators" = !any(is.na(dt_product_choices)))
+
 # Ensure each household-month contains one chosen alternative
-all(rowSums(dt_product_choices, na.rm = TRUE) == 1)
+all(rowSums(dt_product_choices) == 1)
 
 # Write the data to a file
 file_name <- "../Dynamic_Model/Data/Product_Choices.csv"

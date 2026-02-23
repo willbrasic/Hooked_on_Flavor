@@ -36,7 +36,7 @@ options(max.print = 999999)
 options(datatable.print.nrows = 999)
 
 # Image output directory
-output_directory <- file.path("C:/Users/wbras/OneDrvare/Documents/Desktop/UA/",
+output_directory <- file.path("C:/Users/wbras/OneDrive/Documents/Desktop/UA/",
                               "4th_Year_Paper/4th_Year_Paper/4th_Year_Paper_Figures/")
 
 # Load in full panel data
