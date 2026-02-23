@@ -4,20 +4,29 @@
 # wbrasic97@gmail.com
 # February 2026
 #
-# Parallel Monte Carlo simulation via Slurm job arrays.
+# Parallel Monte Carlo simulation via Slurm job arrays with β estimation.
 #
 # Each array task runs a SINGLE replication:
 #   1. Reads replication number s from SLURM_ARRAY_TASK_ID (or command line)
 #   2. Seeds RNG with s for reproducibility
 #   3. Simulates household panel data from the true V_decision
-#   4. Estimates θ via multi-start Nelder-Mead (objective_mc)
+#   4. Estimates θ via multi-start Nelder-Mead
 #   5. Writes one result file: MC_Rep_<s>.csv
+#
+# Changes from 02_MC_Simulation_Array.jl:
+#   - Includes 01_Functions_Beta.jl (4-state TYA transitions, β estimated)
+#   - get_fixed_parameters() returns (ψ, δ) only (no β)
+#   - Loads 4-state TYA via get_tya_states() instead of get_teen_young_adult()
+#   - Loads Π_tya via get_tya_transitions()
+#   - θ_true has 14 params (13 structural + β = 0.95 as present-bias DGP)
+#   - starting_param has 14 params (13 structural + β = 0.90 as offset starting value)
+#   - Passes Π_tya to solve_vfi in the DGP section
 #
 # After all tasks complete, run 03_MC_Aggregate_Results.jl to combine.
 #
 # Usage:
-#   HPC:   sbatch 02_MC_Simulation_Array_Slurm.sb
-#   Local: julia 02_MC_Simulation_Array.jl <replication_number>
+#   HPC:   sbatch 02_MC_Simulation_Array_Beta_Slurm.sb
+#   Local: julia 02_MC_Simulation_Array_Beta.jl <replication_number>
 ################################################################################
 
 
@@ -32,26 +41,26 @@ hpc = !Sys.iswindows()
 if hpc
 
     # Load estimation functions and packages (must come first — provides Printf, CSV, etc.)
-    include("../01_Functions.jl")
+    include("../01_Functions_Beta.jl")
 
     # Load MC-specific functions
-    include("01_MC_Simulation_Functions.jl")
+    include("01_MC_Simulation_Functions_Beta.jl")
 
     # Output path for results (use absolute path so it's unaffected by later cd)
-    output_dir = abspath("./MC_Simulation_Results")
+    output_dir = abspath("./MC_Simulation_Beta_Results")
 
     # Set working directory to where the data CSVs live
     cd("../../Data")
 else
 
     # Load estimation functions and packages (must come first — provides Printf, CSV, etc.)
-    include("../02_Second_Stage_Estimation/01_Functions.jl")
+    include("../02_Second_Stage_Estimation/01_Functions_Beta.jl")
 
     # Load MC-specific functions
-    include("01_MC_Simulation_Functions.jl")
+    include("01_MC_Simulation_Functions_Beta.jl")
 
     # Output path for results
-    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/MC_Simulation_Results"
+    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/MC_Simulation_Beta_Results"
 
     # Set working directory to where the data CSVs live
     cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Data")
@@ -83,6 +92,9 @@ println("Replication $s | seed = $s | PID = $(getpid())")
 # Output Paths
 #############################
 
+# Create output directory if it doesn't exist
+mkpath(output_dir)
+
 # Timestamp for output files
 timestamp = Dates.format(now(), "yyyy-mm-dd_HHMMSS")
 
@@ -94,11 +106,11 @@ results_path = joinpath(output_dir, "$(s_str)_MC_Rep_Results_$timestamp.csv")
 log_path     = joinpath(output_dir, "$(s_str)_MC_Rep_Log_$timestamp.txt")
 trace_path   = joinpath(output_dir, "$(s_str)_MC_Rep_Parameters_$timestamp.csv")
 
-# Open log file for writing (log_io is defined as a global in 01_Functions.jl)
+# Open log file for writing (log_io is defined as a global in 01_Functions_Beta.jl)
 log_io = open(log_path, "w")
 
 # Print and log MC replication start time
-log_msg("MC Replication $s started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+log_msg("MC Replication $s (β estimation) started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
 log_msg("Random seed: $s")
 
 
@@ -108,9 +120,8 @@ log_msg("Random seed: $s")
 
 # Load fixed parameters:
 #   ψ = addiction decay rate (fixed from reduced-form AR(1) estimate)
-#   β = present bias (fixed at 1.0; exponential discounting in the base model)
 #   δ = monthly discount factor (fixed at 0.99)
-ψ, β, δ = get_fixed_parameters();
+ψ, δ = get_fixed_parameters();
 
 
 #############################
@@ -183,6 +194,25 @@ log_msg("Data loading complete in $(round(setup_elapsed, digits=1))s");
 
 
 #############################
+# TYA States and Transitions
+#############################
+
+# Load 4-state TYA assignments from first-stage estimation
+# States: 1=no TYA stable, 2=no TYA approaching, 3=TYA stable, 4=TYA ending
+real_tya_state = get_tya_states();
+
+# Load 4×4 monthly TYA transition matrix from first-stage estimation
+Π_tya = get_tya_transitions();
+
+# Print and log TYA state and transition matrix information
+log_msg("TYA states loaded: $(length(unique(real_tya_state))) unique states")
+log_msg("TYA transition matrix:")
+for row in 1:4
+    log_msg("  State $row → " * join([@sprintf("%.4f", Π_tya[row, col]) for col in 1:4], "  "))
+end
+
+
+#############################
 # Real Household Data
 # (for design-based MC)
 #############################
@@ -192,15 +222,6 @@ log_msg("Data loading complete in $(round(setup_elapsed, digits=1))s");
 # and only simulates choices from the model. This provides realistic
 # cross-sectional price variation needed to identify all parameters.
 real_hh_codes = get_hh_codes();
-
-# Get 4-state TYA classification for each observation (states 1-4)
-# State 1: No TYA, stable; State 2: No TYA, approaching
-# State 3: TYA present, stable; State 4: TYA present, ending soon
-real_tya_state = get_tya_states();
-
-# Load 4×4 monthly TYA transition matrix Π_tya[s, s'] = P(TYA' = s' | TYA = s)
-# Used in VFI to integrate over anticipated TYA state changes
-Π_tya = get_tya_transitions();
 
 # Map observed household prices to continuous values for likelihood interpolation
 _, real_p_continuous = map_prices_to_grid(N_P, P, Pcomb);
@@ -220,6 +241,7 @@ log_msg("Real data loaded: $N_HH_real households, $N_obs_real observations")
 # These are converted to standardized units using the max values from the data.
 # μ, γ have no static counterpart and are set to reasonable starting values.
 # ψ is fixed from the reduced-form AR(1) estimate (not estimated).
+# β = 0.95 is the true present-bias parameter to be recovered.
 α_T_orig  =  0.0187
 α_E_orig  =  0.0096
 α_TE_orig = -0.0021
@@ -238,7 +260,8 @@ log_msg("Real data loaded: $N_HH_real households, $N_obs_real observations")
     ω    = ω_orig * E_max,
     ξ_T  = -3.573,
     ξ_E  = -6.500,
-    ξ_TE = -5.288
+    ξ_TE = -5.288,
+    β    =  0.95       # present bias (1 = exponential, <1 = present-biased)
 );
 
 # Convert to vector for VFI
@@ -289,9 +312,9 @@ t_vfi = time()
 # Get number of addiction states (N_A = 20) and the normalized addiction grid A
 N_A, A = get_addiction_space(ψ);
 
-# Compute flow utility at true θ (all 13 elements)
+# Compute flow utility at true θ (first 13 elements = structural parameters)
 U_true = get_flow_utility(
-    θ_true_vec, N_J, N_A, N_Pcomb, A, c_cig, c_ecig, c_bundle, n, is_non_fda_flavored, is_fda_flavored, cat_idx, E
+    θ_true_vec[1:end-1], N_J, N_A, N_Pcomb, A, c_cig, c_ecig, c_bundle, n, is_non_fda_flavored, is_fda_flavored, cat_idx, E
 );
 
 # Compute addiction transition brackets at fixed ψ
@@ -299,9 +322,10 @@ a_lower_true, a_upper_true, a_weight_true = precompute_addiction_transitions(
     N_J, N_A, ψ, A, n
 );
 
-# Solve VFI at true parameters (cold start)
+# Solve VFI at true parameters with true β and TYA transitions (cold start)
+β_true = θ_true.β
 _, V_decision_true, vfi_iters_true, _ = solve_vfi_sophisticated(
-    N_J, N_A, N_P, N_Pcomb, β, δ, U_true,
+    N_J, N_A, N_P, N_Pcomb, β_true, δ, U_true,
     a_lower_true, a_upper_true, a_weight_true,
     p_cig_lo, p_cig_hi, p_cig_w,
     p_ecig_lo, p_ecig_hi, p_ecig_w,
@@ -322,6 +346,7 @@ log_msg("DGP VFI converged in $vfi_iters_true iterations ($(round(vfi_elapsed, d
 # Starting values for estimation (STANDARDIZED units)
 # Deliberately offset from θ_true to test optimizer recovery.
 # ψ is fixed and not estimated.
+# β starts at 0.90 (offset from true β = 0.95).
 starting_param = (
     α_T  =  0.5,
     α_E  =  0.3,
@@ -335,12 +360,14 @@ starting_param = (
     ω    = -1.0,
     ξ_T  = -2.0,
     ξ_E  = -4.0,
-    ξ_TE = -3.0
+    ξ_TE = -3.0,
+    β    =  0.90      # present bias starting value (offset from 0.95)
 );
 
 # Initial simplex deviations for Nelder-Mead
 # Scaled to ~50% of the absolute value of each starting parameter;
 # μ and γ get larger deviations since they have no informed starting values.
+# β gets a deviation of 0.10 to explore the [0.01, 1.00] range.
 # ψ is fixed and not included.
 add = [
     abs(starting_param.α_T)  * 0.50,   # α_T
@@ -355,7 +382,8 @@ add = [
     abs(starting_param.ω)    * 0.50,   # ω
     abs(starting_param.ξ_T)  * 0.50,   # ξ_T
     abs(starting_param.ξ_E)  * 0.50,   # ξ_E
-    abs(starting_param.ξ_TE) * 0.50    # ξ_TE
+    abs(starting_param.ξ_TE) * 0.50,   # ξ_TE
+    0.10                                # β
 ];
 
 

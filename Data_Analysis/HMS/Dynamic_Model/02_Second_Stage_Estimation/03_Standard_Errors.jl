@@ -18,7 +18,7 @@
 # Variance-covariance matrix: H^{-1}
 # Standard errors: SE[k] = sqrt(H^{-1}[k,k])
 #
-# Reads estimated parameters from Dynamic_Model_Estimates.txt (produced by
+# Reads estimated parameters from Dynamic_Model_Estimates.csv (produced by
 # 02_Estimation.jl). Progress is logged to SE_Log.txt.
 ################################################################################
 
@@ -27,7 +27,7 @@
 # Preliminaries
 #############################
 
-# Load all functions and packages
+# Load all functions and packages from the functions file
 include("01_Functions.jl")
 using LinearAlgebra
 
@@ -39,36 +39,41 @@ cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_D
 # Output Paths
 #############################
 
-# Output path for results
+# Output path for results (local Windows path)
 output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Results"
 log_path = joinpath(output_dir, "SE_Log.txt")
 
-# Open log file and set global handle
-est_log_io = open(log_path, "w")
-est_log("SE computation started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+# Open log file for writing (log_io is defined as a global in 01_Functions.jl)
+log_io = open(log_path, "w")
+
+# Print and log SE computation start time
+log_msg("SE computation started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
 
 
 #############################
 # State Spaces and Choices
 #############################
 
+# Start timer for data prep
 t_setup = time()
 
-# Initial addiction grid (ψ is now estimated; objective() recomputes A from θ_vec)
-N_A, A = get_addiction_space(0.94)
+# Load fixed parameters (ψ is the addiction decay rate, fixed from reduced-form AR(1) estimate)
+ψ, _, _ = get_fixed_parameters();
 
-# Get number of alternatives (N_J) and choice matrix (J)
-_, N_J, J = get_product_choices()
+# Get number of addiction states (N_A = 20) and the normalized addiction grid A
+N_A, A = get_addiction_space(ψ);
 
-# Get choice vector (y[i] = chosen alternative index for observation i)
-y = get_hh_choices(J)
+# Get number of observations (N_HHT), number of alternatives (N_J), and choice matrix J
+_, N_J, J = get_product_choices();
+
+# Convert choice matrix J to choice vector y where y[i] = chosen alternative index for observation i
+y = get_hh_choices(J);
 
 # Get household identifiers (pre-loaded to avoid repeated CSV reads in objective)
-# Note: variable must be named hh_codes to match what objective() expects
-hh_codes = get_hh_codes()
+hh_codes = get_hh_codes();
 
-# Get number of categories excluding outside option (N_K)
-N_K, _ = get_category_choices()
+# Get number of product categories excluding the outside option
+N_K, _ = get_category_choices();
 
 
 #############################
@@ -76,73 +81,87 @@ N_K, _ = get_category_choices()
 #############################
 
 # Get consumption vectors by alternative (STANDARDIZED by max)
-# c_bundle is standardized by its own max (not c_cig_max × c_ecig_max)
-N_cig, N_orig_ecig, N_flav_ecig, _, c_cig, c_ecig, c_bundle, c_cig_max, c_ecig_max, c_bundle_max = get_consumption(N_J)
+# c_bundle is standardized by its own max (not c_cig_max × c_ecig_max) for reasonable α_TE scaling
+# Max values are needed for rescaling parameter estimates to original units
+N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, _, c_cig, c_ecig, c_bundle, c_cig_max, c_ecig_max, c_bundle_max = get_consumption(N_J);
 
 # Get nicotine vector by alternative (STANDARDIZED by max)
-n, n_max = get_nicotine(N_J)
+# n_max is the raw max value for rescaling estimates
+n, n_max = get_nicotine(N_J);
 
-# Get category index by alternative: cat_idx[j] ∈ {0, 1, 2, 3, 4, 5}
-cat_idx = get_category_index(N_J, N_cig, N_orig_ecig, N_flav_ecig)
+# Get category index by alternative
+cat_idx = get_category_index(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig);
 
-# Get flavored indicator by alternative: is_flavored[j] ∈ {true, false}
-is_flavored = get_flavored_indicator(cat_idx)
+# Get non-FDA flavored indicator by alternative: is_non_fda_flavored[j] ∈ {0, 1}
+is_non_fda_flavored = get_non_fda_flavored_indicator(cat_idx);
+
+# Get FDA flavored indicator by alternative: is_fda_flavored[j] ∈ {0, 1}
+is_fda_flavored = get_fda_flavored_indicator(cat_idx);
 
 
 #############################
 # Demographics
 #############################
 
-# Get TYA binary indicator for each observation
-_, tya = get_teen_young_adult()
+# Get 4-state TYA classification for each observation (states 1-4)
+# State 1: No TYA, stable; State 2: No TYA, approaching
+# State 3: TYA present, stable; State 4: TYA present, ending soon
+tya_state = get_tya_states()
 
-# Get TYA state index for each observation (1 = no TYA, 2 = TYA present)
-tya_state = get_tya_state(tya)
+# Load 4×4 monthly TYA transition matrix Π_tya[s, s'] = P(TYA' = s' | TYA = s)
+# Used in VFI to integrate over anticipated TYA state changes
+Π_tya = get_tya_transitions()
 
 
 #############################
 # Price Space
 #############################
 
-# Get pricing grid (N_P points per category)
-N_P, P = get_pricing_spaces()
+# Get pricing grid: N_P points per category, P is N_P × 2 (cig, ecig)
+N_P, P = get_pricing_spaces();
 
-# Get all price combinations: N_Pcomb = N_P^2, Pcomb is N_Pcomb × 2
-N_Pcomb, Pcomb = get_pricing_spaces_combination(N_K, N_P, P)
+# Get all price combinations
+N_Pcomb, Pcomb = get_pricing_spaces_combination(N_K, N_P, P);
 
-# Get expenditure matrix (STANDARDIZED by max)
-E, E_max = get_expenditures(N_J, N_Pcomb, c_cig, c_ecig, c_cig_max, c_ecig_max, Pcomb)
+# Get price ratios for quantity discount adjustment (price per unit varies by bin size)
+ratio_cig, ratio_ecig = get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, c_cig, c_ecig);
 
-# Get price transitions from Halton draws: T[m, r, k]
-T = get_transitions(N_K)
+# Get expenditure matrix E[p, j] = p_cig(p) * c_cig[j] + p_ecig(p) * c_ecig[j]
+# STANDARDIZED by E_max; E_max is the raw max value for rescaling estimates
+E, E_max = get_expenditures(N_J, N_Pcomb, c_cig, c_ecig, c_cig_max, c_ecig_max, Pcomb, ratio_cig, ratio_ecig);
 
-# Pre-compute price transition brackets and interpolation weights
-p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_transitions(N_P, P, T)
+# Get Halton draw price transitions: T[m, r, k] where m = price state, r = draw, k = category
+T = get_transitions(N_K);
+
+# Pre-compute bilinear interpolation brackets and weights for price transitions
+# Returns 6 matrices (M × R): lo/hi grid indices and weights for each category
+p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_transitions(N_P, P, T);
 
 
 #############################
 # Household Price Trajectories
 #############################
 
-# Map observed prices to continuous values for likelihood interpolation
-# p_continuous: actual continuous prices N × 2 (cig, ecig)
-_, p_continuous = map_prices_to_grid(N_P, P, Pcomb)
+# Map observed household prices to continuous values for likelihood interpolation
+# p_continuous is N × 2 (cig price, ecig price) — actual per-unit prices, not grid indices
+_, p_continuous = map_prices_to_grid(N_P, P, Pcomb);
 
+# Log data setup completion time and sample size
 setup_elapsed = time() - t_setup
-est_log("Data loading complete in $(round(setup_elapsed, digits=1))s")
-est_log("Observations: $(length(y))")
+log_msg("Data loading complete in $(round(setup_elapsed, digits=1))s")
+log_msg("Observations: $(length(y))")
 
 
 #############################
 # Fixed Parameters
 #############################
 
-# ψ is now estimated (part of θ_vec); objective() recomputes A at each eval
+# ψ is fixed from reduced-form AR(1) estimate (loaded above via get_fixed_parameters)
 
 # Present bias parameter (β-δ discounting; β = 1.0 is standard exponential)
 β = 1.0
 
-# Monthly discount factor
+# Monthly discount factor (fixed at 0.99)
 δ = 0.99
 
 
@@ -151,7 +170,7 @@ est_log("Observations: $(length(y))")
 #############################
 
 # Read θ_hat from the estimates file produced by 02_Estimation.jl
-estimates_path = joinpath(output_dir, "Dynamic_Model_Estimates.txt")
+estimates_path = joinpath(output_dir, "Dynamic_Model_Estimates.csv")
 df_est = CSV.read(estimates_path, DataFrame)
 
 # Extract parameter names and values
@@ -159,11 +178,11 @@ param_names = names(df_est)
 N_params = length(param_names)
 θ_hat = Float64.(collect(df_est[1, :]))
 
-# Print loaded parameters
-est_log("\nLoaded estimates from: $estimates_path")
-est_log("Parameters:")
+# Print and log loaded parameters
+log_msg("\nLoaded estimates from: $estimates_path")
+log_msg("Parameters:")
 for k in 1:N_params
-    est_log("  $(param_names[k]) = $(θ_hat[k])")
+    log_msg("  $(param_names[k]) = $(θ_hat[k])")
 end
 
 # Set global parameter names for objective function logging
@@ -174,15 +193,15 @@ est_param_names = collect(String, param_names)
 # Evaluate Objective at θ_hat
 #############################
 
-# Reset evaluation counter
+# Reset the global evaluation counter before SE computation
 global est_eval_count = 0
 
-# Evaluate the objective at θ_hat to get the neg LL
-est_log("\nEvaluating objective at θ_hat...")
+# Print and log the objective evaluation at θ_hat
+log_msg("\nEvaluating objective at θ_hat...")
 t_eval = time()
 nll_center = objective(θ_hat)
 eval_elapsed = time() - t_eval
-est_log("neg LL at θ_hat = $(round(nll_center, digits=4)) ($(round(eval_elapsed, digits=1))s)")
+log_msg("neg LL at θ_hat = $(round(nll_center, digits=4)) ($(round(eval_elapsed, digits=1))s)")
 
 
 #############################
@@ -207,11 +226,12 @@ est_log("neg LL at θ_hat = $(round(nll_center, digits=4)) ($(round(eval_elapsed
 #
 # Each evaluation calls the full objective (VFI + LL), so this is slow.
 # Total evaluations: 1 center + N_params diagonal (2 each) + N_params*(N_params-1)/2
-# off-diagonal (4 each) = 1 + 2*11 + 4*55 = 243 for 11 parameters.
+# off-diagonal (4 each) = 1 + 2*13 + 4*78 = 339 for 13 parameters.
 
-est_log("\n==============================================")
-est_log("Computing Hessian via finite differences")
-est_log("==============================================")
+# Print and log Hessian computation header
+log_msg("\n==============================================")
+log_msg("Computing Hessian via finite differences")
+log_msg("==============================================")
 
 t_hessian = time()
 
@@ -225,7 +245,8 @@ H = zeros(N_params, N_params)
 n_diagonal = N_params
 n_off_diagonal = N_params * (N_params - 1) ÷ 2
 n_total = n_diagonal + n_off_diagonal
-est_log("Pairs to compute: $n_diagonal diagonal + $n_off_diagonal off-diagonal = $n_total total")
+# Print and log number of pairs to compute
+log_msg("Pairs to compute: $n_diagonal diagonal + $n_off_diagonal off-diagonal = $n_total total")
 
 # Counter for progress logging
 pair_count = 0
@@ -252,7 +273,7 @@ for k in 1:N_params
             H[k, k] = (f_plus - 2.0 * nll_center + f_minus) / h^2
 
             pair_elapsed = time() - t_pair
-            est_log("  Pair $pair_count/$n_total | H[$k,$l] (diagonal) = $(round(H[k,k], digits=4)) | $(round(pair_elapsed, digits=1))s")
+            log_msg("  Pair $pair_count/$n_total | H[$k,$l] (diagonal) = $(round(H[k,k], digits=4)) | $(round(pair_elapsed, digits=1))s")
 
         else
 
@@ -288,14 +309,15 @@ for k in 1:N_params
             H[l, k] = H[k, l]
 
             pair_elapsed = time() - t_pair
-            est_log("  Pair $pair_count/$n_total | H[$k,$l] (off-diag) = $(round(H[k,l], digits=4)) | $(round(pair_elapsed, digits=1))s")
+            log_msg("  Pair $pair_count/$n_total | H[$k,$l] (off-diag) = $(round(H[k,l], digits=4)) | $(round(pair_elapsed, digits=1))s")
 
         end
     end
 end
 
 hessian_elapsed = time() - t_hessian
-est_log("\nHessian computed in $(round(hessian_elapsed, digits=1))s")
+# Print and log Hessian computation time
+log_msg("\nHessian computed in $(round(hessian_elapsed, digits=1))s")
 
 
 #############################
@@ -313,13 +335,13 @@ se = sqrt.(abs.(diag(V)))
 # Diagnostics
 #############################
 
-# Check that H is positive definite (eigenvalues > 0)
+# Print and log Hessian eigenvalue diagnostics
 eigvals_H = eigvals(H)
-est_log("Hessian eigenvalues: min = $(round(minimum(eigvals_H), digits=2)), max = $(round(maximum(eigvals_H), digits=2))")
+log_msg("Hessian eigenvalues: min = $(round(minimum(eigvals_H), digits=2)), max = $(round(maximum(eigvals_H), digits=2))")
 if all(eigvals_H .> 0)
-    est_log("Hessian is positive definite (valid MLE)")
+    log_msg("Hessian is positive definite (valid MLE)")
 else
-    est_log("WARNING: Hessian is NOT positive definite — SEs may be unreliable")
+    log_msg("WARNING: Hessian is NOT positive definite — SEs may be unreliable")
 end
 
 
@@ -327,19 +349,20 @@ end
 # Results Table
 #############################
 
-est_log("\n\n==============================================")
-est_log("Standard Error Results")
-est_log("==============================================")
+# Print and log standard error results
+log_msg("\n\n==============================================")
+log_msg("Standard Error Results")
+log_msg("==============================================")
 
-# Table header
-est_log("")
-est_log(@sprintf("%-8s  %12s  %10s  %10s", "Param", "Estimate", "Std Err", "t-stat"))
-est_log(repeat("-", 55))
+# Print and log results table header
+log_msg("")
+log_msg(@sprintf("%-8s  %12s  %10s  %10s", "Param", "Estimate", "Std Err", "t-stat"))
+log_msg(repeat("-", 55))
 
-# Print results to table
+# Print and log results table
 for k in 1:N_params
     t_stat = θ_hat[k] / se[k]
-    est_log(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat[k], se[k], t_stat))
+    log_msg(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat[k], se[k], t_stat))
 end
 
 
@@ -347,17 +370,19 @@ end
 # Save Results
 #############################
 
-# Save SEs to file
-se_path = joinpath(output_dir, "Dynamic_Model_Standard_Errors.txt")
+# Save standard errors to a CSV file
+se_path = joinpath(output_dir, "Dynamic_Model_Standard_Errors.csv")
 open(se_path, "w") do io
-    println(io, join(param_names, "\t"))
-    println(io, join([@sprintf("%.10f", θ_hat[k]) for k in 1:N_params], "\t"))
-    println(io, join([@sprintf("%.10f", se[k]) for k in 1:N_params], "\t"))
+    println(io, join(param_names, ","))
+    println(io, join([@sprintf("%.10f", θ_hat[k]) for k in 1:N_params], ","))
+    println(io, join([@sprintf("%.10f", se[k]) for k in 1:N_params], ","))
 end
-est_log("\nSEs saved to: $se_path")
+# Print and log SE save location
+log_msg("\nSEs saved to: $se_path")
 
-est_log("\nSE computation finished at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
-est_log("Log saved to: $log_path")
+# Print and log SE computation finished message
+log_msg("\nSE computation finished at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+log_msg("Log saved to: $log_path")
 
-# Close log file
-close(est_log_io)
+# Close the log file handle
+close(log_io)

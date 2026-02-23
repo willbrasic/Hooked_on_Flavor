@@ -2,14 +2,23 @@
 # William Brasic
 # The University of Arizona
 # wbrasic97@gmail.com
-# February 2025
+# February 2026
 #
-# This script estimates the structural parameters of the dynamic model by
-# maximizing the sample log-likelihood via multi-start Nelder-Mead.
+# Beta estimation variant of 02_Estimation.jl. Estimates β (present bias) as
+# the 14th structural parameter and uses the 4-state TYA classification with
+# transition matrix Π_tya.
+#
+# Changes from 02_Estimation.jl:
+#   - Includes 01_Functions_Beta.jl instead of 01_Functions.jl
+#   - get_fixed_parameters() returns (ψ, δ) only (no β; β is estimated)
+#   - Uses get_tya_states() for 4-state TYA instead of binary get_tya_state()
+#   - Loads Π_tya via get_tya_transitions()
+#   - θ has 14 parameters (13 structural + β as the 14th)
+#   - Output files named with "Beta" prefix
 #
 # The objective function for each candidate θ:
-#   1. Recomputes flow utility U given θ
-#   2. Solves the value function via VFI
+#   1. Recomputes flow utility U given θ[1:13]
+#   2. Solves the value function via VFI with β = θ[14] and Π_tya
 #   3. Computes the log-likelihood by trilinearly interpolating V_decision
 #      at each observation's continuous (addiction, price) state
 #   4. Returns the negative log-likelihood (since we minimize)
@@ -22,8 +31,8 @@
 # Preliminaries
 #############################
 
-# Load all functions and packages from the functions file
-include("./01_Functions.jl")
+# Load all functions and packages from the Beta functions file
+include("./01_Functions_Beta.jl")
 
 # Detect whether we are running on the HPC (any non-Windows system)
 hpc = !Sys.iswindows()
@@ -32,7 +41,7 @@ hpc = !Sys.iswindows()
 timestamp = Dates.format(now(), "yyyy-mm-dd_HHMMSS")
 
 # Name for the estimation log file
-est_log_name = "Dynamic_Model_Estimation_Log_$(timestamp).txt"
+est_log_name = "Dynamic_Model_Beta_Estimation_Log_$(timestamp).txt"
 
 if hpc
 
@@ -52,11 +61,11 @@ else
     cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Data")
 end
 
-# Open log file for writing (log_io is defined as a global in 01_Functions.jl)
+# Open log file for writing (log_io is defined as a global in 01_Functions_Beta.jl)
 log_io = open(log_path, "w")
 
 # Print and log the start time and number of Julia threads available for VFI parallelization
-log_msg("Dynamic estimation started at $(timestamp)")
+log_msg("Dynamic Beta estimation started at $(timestamp)")
 log_msg("Number of threads: $(Threads.nthreads())")
 
 # Get household identifiers (pre-loaded to avoid repeated CSV reads in objective)
@@ -69,9 +78,9 @@ hh_codes = get_hh_codes();
 
 # Load fixed parameters:
 #   ψ = addiction decay rate (fixed from reduced-form AR(1) estimate in 05_Reduced_Form_Psi.R)
-#   β = present bias (fixed at 1.0; exponential discounting in the base model)
 #   δ = monthly discount factor (fixed at 0.99)
-ψ, β, δ = get_fixed_parameters();
+# NOTE: β is NOT returned here — it is estimated as the 14th parameter
+ψ, δ = get_fixed_parameters();
 
 
 #############################
@@ -81,7 +90,7 @@ hh_codes = get_hh_codes();
 # Start timer for data prep
 t_setup = time()
 
-# Get number of addiction states (N_A = 20) and the normalized addiction grid A 
+# Get number of addiction states (N_A = 20) and the normalized addiction grid A
 N_A, A = get_addiction_space(ψ);
 
 # Get number of observations (N_HHT), number of alternatives (N_J), and choice matrix J
@@ -122,13 +131,15 @@ is_fda_flavored = get_fda_flavored_indicator(cat_idx);
 #############################
 
 # Get 4-state TYA classification for each observation (states 1-4)
-# State 1: No TYA, stable; State 2: No TYA, approaching
-# State 3: TYA present, stable; State 4: TYA present, ending soon
-tya_state = get_tya_states()
+# State 1: No TYA, stable (oldest child ≤ 10 or no children)
+# State 2: No TYA, approaching (oldest child 11-12)
+# State 3: TYA present, stable (youngest TYA member ≤ 23)
+# State 4: TYA present, ending soon (youngest TYA member ≥ 24)
+tya_state = get_tya_states();
 
-# Load 4×4 monthly TYA transition matrix Π_tya[s, s'] = P(TYA' = s' | TYA = s)
-# Used in VFI to integrate over anticipated TYA state changes
-Π_tya = get_tya_transitions()
+# Load 4×4 monthly TYA transition matrix Π_tya where Π_tya[s, s'] = P(TYA' = s' | TYA = s)
+# Used in VFI to integrate over anticipated TYA state changes (key for β identification)
+Π_tya = get_tya_transitions();
 
 
 #############################
@@ -157,7 +168,7 @@ p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_t
 
 
 #############################
-# Household Price 
+# Household Price
 # Trajectories
 #############################
 
@@ -166,7 +177,7 @@ p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_t
 _, p_continuous = map_prices_to_grid(N_P, P, Pcomb);
 
 # Log data setup completion time and sample size
-setup_elapsed = time() - t_setup
+setup_elapsed = time() - t_setup;
 log_msg("Data loading complete in $(round(setup_elapsed, digits=1))s")
 log_msg("Observations: $(length(y))")
 
@@ -189,9 +200,9 @@ static_logit_orig = (
     α_T  =  0.0187,   # utils per pack
     α_E  =  0.0096,   # utils per mL
     α_TE = -0.0021,   # utils per (pack × mL)
-    λ_1  =  0.852,    # non-FDA flavor baseline (multiplies indicator, no conversion)
+    λ_1  =  0.852,    # non-FDA baseline flavor effect (multiplies indicator, no conversion)
     λ_2  =  0.703,    # non-FDA flavor × TYA interaction (multiplies indicator, no conversion)
-    λ_3  =  0.5,      # FDA flavor baseline (multiplies indicator, no conversion)
+    λ_3  =  0.5,      # FDA baseline flavor effect (multiplies indicator, no conversion)
     λ_4  =  0.5,      # FDA flavor × TYA interaction (multiplies indicator, no conversion)
     ω    = -0.0055,   # utils per dollar
     ξ_T  = -3.573,    # cigarette fixed effect (additive, no conversion)
@@ -201,6 +212,7 @@ static_logit_orig = (
 
 # Standardized starting values for the dynamic model
 # μ and γ have no static logit counterpart (they are dynamic-only parameters).
+# β is the 14th parameter: present bias, initialized at 0.90 (mild present bias).
 starting_param = (
     α_T  = static_logit_orig.α_T  * c_cig_max,
     α_E  = static_logit_orig.α_E  * c_ecig_max,
@@ -214,7 +226,8 @@ starting_param = (
     ω    = static_logit_orig.ω * E_max,
     ξ_T  = static_logit_orig.ξ_T,
     ξ_E  = static_logit_orig.ξ_E,
-    ξ_TE = static_logit_orig.ξ_TE
+    ξ_TE = static_logit_orig.ξ_TE,
+    β    =  0.90       # Present bias; 1.0 = exponential, < 1.0 = present-biased
 )
 
 # Initial simplex deviations for Nelder-Mead
@@ -231,7 +244,8 @@ add = [
     abs(starting_param.ω)    * 0.50,   # ω
     abs(starting_param.ξ_T)  * 0.50,   # ξ_T
     abs(starting_param.ξ_E)  * 0.50,   # ξ_E
-    abs(starting_param.ξ_TE) * 0.50    # ξ_TE
+    abs(starting_param.ξ_TE) * 0.50,   # ξ_TE
+    0.10                               # β:  deviation of 0.10 around starting value of 0.90
 ]
 
 # Optimizer settings for random_amoeba multi-start Nelder-Mead
@@ -265,8 +279,8 @@ est_eval_count = 0
 est_param_names = collect(String, string.(keys(starting_param)))
 
 # File paths for writing parameters after each outer try and inner try
-outer_try_path = joinpath(output_dir, "Dynamic_Model_Outer_Try_Params_$(timestamp).csv")
-inner_try_path = joinpath(output_dir, "Dynamic_Model_Inner_Try_Params_$(timestamp).csv")
+outer_try_path = joinpath(output_dir, "Dynamic_Model_Beta_Outer_Try_Params_$(timestamp).csv")
+inner_try_path = joinpath(output_dir, "Dynamic_Model_Beta_Inner_Try_Params_$(timestamp).csv")
 
 # Run multi-start Nelder-Mead optimization
 t_est = time()
@@ -291,8 +305,8 @@ for (name, val) in pairs(opt_param)
     log_msg("  $name = $val")
 end
 
-# Save estimated parameters to a CSV file 
-estimates_path = joinpath(output_dir, "Dynamic_Model_Estimates.csv")
+# Save estimated parameters to a CSV file
+estimates_path = joinpath(output_dir, "Dynamic_Model_Beta_Estimates.csv")
 open(estimates_path, "w") do io
     println(io, join(collect(String, string.(keys(opt_param))), ","))
     println(io, join([@sprintf("%.10f", v) for v in values(opt_param)], ","))
@@ -305,9 +319,9 @@ log_msg("Inner try parameters saved to: $inner_try_path")
 #-----------------------------------------------------------------------
 # Rescaling Estimates to Original Units
 #-----------------------------------------------------------------------
-# The estimated parameters (opt_param) are in STANDARDIZED units because 
-# the data entering the utility function was standardized. To interpret 
-# the estimates in original units (utils per pack, utils per dollar, 
+# The estimated parameters (opt_param) are in STANDARDIZED units because
+# the data entering the utility function was standardized. To interpret
+# the estimates in original units (utils per pack, utils per dollar,
 # etc.), rescale as follows:
 #
 #   α_T_orig  = α_T_std  / c_cig_max           → utils per pack
@@ -340,6 +354,7 @@ log_msg("Inner try parameters saved to: $inner_try_path")
 #
 #   λ_1, λ_2, λ_3, λ_4 = no rescaling needed (multiply binary indicators)
 #   ξ_T, ξ_E, ξ_TE = no rescaling needed (additive constants)
+#   β = no rescaling needed (dimensionless discount parameter ∈ [0.01, 1.00])
 #   ψ = fixed from reduced-form AR(1) estimate (not estimated)
 #
 # STANDARDIZATION FACTORS (logged above, repeated here for convenience):
@@ -350,7 +365,7 @@ log_msg("Inner try parameters saved to: $inner_try_path")
 #   E_max        = $(E_max) dollars
 #-----------------------------------------------------------------------
 
-# Print and log rescalling 
+# Print and log rescalling
 log_msg("\n")
 log_msg("===================================")
 log_msg("Rescaling to Original Units")
@@ -363,12 +378,12 @@ log_msg("  ω_orig    = ω    / $E_max")
 log_msg("  μ_orig    = μ × ψ̂ / n_max² (reinforcement: μ·ã·n_std[j]; ã = ψ·a_raw/n_max, n_std = n_raw/n_max)")
 log_msg("  γ_orig    = γ × ψ̂ / n_max  (withdrawal: γ·ã; ã = ψ·a_raw/n_max)")
 log_msg("  λ_1, λ_2, λ_3, λ_4, ξ_T, ξ_E, ξ_TE: no rescaling needed")
+log_msg("  β = no rescaling needed (dimensionless)")
 log_msg("  ψ = $ψ (fixed from reduced-form AR(1) estimate)")
 
-# Print and log estimation finished message 
+# Print and log estimation finished message
 log_msg("\nEstimation finished at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
 log_msg("Log saved to: $log_path")
 
 # Close the log file handle
 close(log_io)
-

@@ -2,31 +2,39 @@
 # William Brasic
 # The University of Arizona
 # wbrasic97@gmail.com
-# January 2026
+# February 2026
 #
-# This script estimates the structural parameters of the static logit model
-# by maximizing the sample log-likelihood via L-BFGS with analytical gradients.
+# This script estimates the structural parameters of the static NESTED logit
+# model by maximizing the sample log-likelihood via L-BFGS with analytical
+# gradients (ForwardDiff).
 #
-# The static model drops the dynamic addiction terms (μ, γ) from the flow
-# utility and does not require value function iteration. Prices enter as
-# continuous observed values rather than discretized grid states.
+# The nested logit relaxes IIA by grouping alternatives into nests with
+# stronger within-nest substitution. This is critical for the flavor ban
+# counterfactual: when flavored e-cigs are removed, consumers substitute
+# primarily toward original e-cigs (same nest) rather than cigarettes.
 #
-# Parameters (12): α_T, α_E, α_TE, λ_1, λ_2, λ_3, λ_4, ρ, ω, ξ_T, ξ_E, ξ_TE
+# Nesting structure (4 nests, 1 common σ):
+#   Nest 1: Outside option (j=1)                               — 1 alternative
+#   Nest 2: Cigarettes (j=2:13)                                — 12 alternatives
+#   Nest 3: E-cigs orig+non-FDA flav+FDA flav (j=14:34)       — 21 alternatives
+#   Nest 4: Bundles orig+non-FDA flav+FDA flav (j=35:40)      — 6 alternatives
 #
-# ρ captures state dependence (lagged category choice), motivating the
-# dynamic model: significant ρ → past choices predict current behavior
-# (addiction/habit persistence) which a static model cannot properly
-# account for.
+# Parameters (13): α_T, α_E, α_TE, λ_1, λ_2, λ_3, λ_4, ρ, ω, ξ_T, ξ_E, ξ_TE, σ
+#
+# σ is estimated as σ_raw (unconstrained) and transformed via logistic:
+#   σ = 1/(1+exp(-σ_raw)) ∈ (0,1)
+# When σ = 0: standard logit. When σ > 0: stronger within-nest substitution.
 #
 # IMPORTANT: Estimates are in ORIGINAL UNITS (utils per pack, utils per mL, etc.)
 # The dynamic model (02_Estimation.jl) uses STANDARDIZED data, so it converts
 # these estimates to standardized units when using them as starting values:
 #   α_T_std  = α_T_orig  × c_cig_max
 #   α_E_std  = α_E_orig  × c_ecig_max
-#   α_TE_std = α_TE_orig × c_bundle_max  (actual max of c_cig×c_ecig, not c_cig_max×c_ecig_max)
+#   α_TE_std = α_TE_orig × c_bundle_max
 #   ω_std    = ω_orig    × E_max
+#   σ: no conversion needed (dimensionless, plugged into dynamic model as fixed)
 #
-# Progress is logged to Static_Logit_Estimation_Log_<timestamp>.txt.
+# Progress is logged to Static_Nested_Logit_Estimation_Log_<timestamp>.txt.
 ################################################################################
 
 
@@ -40,7 +48,7 @@ hpc = !Sys.iswindows()
 # Load all functions and packages, set output path, and set working directory
 using Dates
 timestamp = Dates.format(now(), "yyyy-mm-dd_HHMMSS")
-est_log_name = "Static_Logit_Estimation_Log_$(timestamp).txt"
+est_log_name = "Static_Nested_Logit_Estimation_Log_$(timestamp).txt"
 if hpc
     # Include functions file
     include("../Dynamic_Model/01_Functions.jl")
@@ -49,9 +57,9 @@ if hpc
     output_dir = "./Static_Logit_Results"
     log_path = joinpath(output_dir, est_log_name)
 
-    # Open log file and set global log_io handle (defined in 01_Functions.jl)
+    # Open log file and set global handle
     global log_io = open(log_path, "w")
-    log_msg("Static estimation started at $(timestamp)")
+    log_msg("Static nested logit estimation started at $(timestamp)")
 
     # Set working directory to where the data CSVs live
     cd("../Data")
@@ -63,9 +71,9 @@ else
     output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Static_Logit_Results"
     log_path = joinpath(output_dir, est_log_name)
 
-    # Open log file and set global log_io handle (defined in 01_Functions.jl)
+    # Open log file and set global handle
     global log_io = open(log_path, "w")
-    log_msg("Static estimation started at $(timestamp)")
+    log_msg("Static nested logit estimation started at $(timestamp)")
 
     # Set working directory to where the data CSVs live
     cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Data")
@@ -102,10 +110,10 @@ c_bundle = c_bundle_std .* c_bundle_max
 # Get category index by alternative: cat_idx[j] ∈ {0, 1, 2, 3, 4, 5, 6, 7}
 cat_idx = get_category_index(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig)
 
-# Get non-FDA flavored indicator by alternative: is_non_fda_flavored[j] ∈ {true, false}
+# Get non-FDA flavored indicator by alternative (cat ∈ {3, 6})
 is_non_fda_flavored = get_non_fda_flavored_indicator(cat_idx)
 
-# Get FDA flavored indicator by alternative: is_fda_flavored[j] ∈ {true, false}
+# Get FDA flavored indicator by alternative (cat ∈ {4, 7})
 is_fda_flavored = get_fda_flavored_indicator(cat_idx)
 
 # Get price ratios for quantity discounts (ratio = bin median / category median)
@@ -176,8 +184,8 @@ log_msg("  c_bundle_max = $c_bundle_max packs×mL (actual max, not c_cig_max × 
 # Fixed effect category for each alternative:
 #   0 = outside option (no FE)
 #   1 = cigarettes (ξ_T)
-#   2 = any e-cigarettes: orig, non-FDA flav, FDA flav (ξ_E)
-#   3 = any bundles: orig, non-FDA flav, FDA flav (ξ_TE)
+#   2 = e-cigarettes (ξ_E)
+#   3 = bundles (ξ_TE)
 fe_idx = zeros(Int, N_J)
 for j in 1:N_J
     if cat_idx[j] == 1
@@ -226,20 +234,59 @@ end
 
 
 #############################
+# Nest Structure
+#############################
+
+# Map each alternative to its nest (1-indexed):
+#   Nest 1: Outside option (cat_idx = 0)
+#   Nest 2: Cigarettes (cat_idx = 1)
+#   Nest 3: E-cigs, orig + non-FDA flav + FDA flav (cat_idx = 2, 3, or 4)
+#   Nest 4: Bundles, orig + non-FDA flav + FDA flav (cat_idx = 5, 6, or 7)
+N_nests = 4
+nest_id = zeros(Int, N_J)
+for j in 1:N_J
+    if cat_idx[j] == 0
+        nest_id[j] = 1
+    elseif cat_idx[j] == 1
+        nest_id[j] = 2
+    elseif cat_idx[j] in (2, 3, 4)
+        nest_id[j] = 3
+    elseif cat_idx[j] in (5, 6, 7)
+        nest_id[j] = 4
+    end
+end
+
+# Alternatives in each nest (vector of index vectors)
+nest_alts = [findall(nest_id .== g) for g in 1:N_nests]
+
+# Log nest structure
+log_msg("\nNest structure:")
+nest_labels = ["Outside", "Cigarettes", "E-cigs", "Bundles"]
+for g in 1:N_nests
+    log_msg("  Nest $g ($(nest_labels[g])): $(length(nest_alts[g])) alternatives (j = $(nest_alts[g][1]):$(nest_alts[g][end]))")
+end
+
+
+#############################
 # Negative Log-Likelihood
 #############################
 
 """
-Negative log-likelihood for the static logit model.
+Negative log-likelihood for the static NESTED logit model.
 Used with L-BFGS via automatic differentiation (autodiff = :forward).
 
-Parameters (12):
+Parameters (13):
   α_T, α_E, α_TE     = consumption utility
-  λ_1, λ_2           = non-FDA flavor effects (baseline, × TYA)
-  λ_3, λ_4           = FDA flavor effects (baseline, × TYA)
+  λ_1, λ_2           = non-FDA flavor effects (baseline + TYA interaction)
+  λ_3, λ_4           = FDA flavor effects (baseline + TYA interaction)
   ρ                   = state dependence (lagged category match)
   ω                   = expenditure coefficient
   ξ_T, ξ_E, ξ_TE     = category fixed effects
+  σ_raw               = nesting parameter (unconstrained; σ = logistic(σ_raw))
+
+Nested logit choice probability:
+  IV_g = logsumexp(v_k/(1-σ) for k in nest g)
+  log P(j) = v_j/(1-σ) - σ × IV_{nest(j)} - logsumexp((1-σ) × IV_{g'} for all g')
 
 Data arrays are passed as arguments so they are typed locals inside the
 function, avoiding global-variable type instability with ForwardDiff.
@@ -248,32 +295,40 @@ function neg_log_likelihood(θ_vec, N_obs, N_J, tya, y,
                             c_cig, c_ecig, c_bundle,
                             is_non_fda_flavored, is_fda_flavored,
                             lag_match, E_obs,
-                            fe_T, fe_E, fe_TE)
+                            fe_T, fe_E, fe_TE,
+                            N_nests, nest_id, nest_alts)
 
-    # Unpack parameters (12 total)
-    α_T  = θ_vec[1]   # Cigarette utility (per pack)
-    α_E  = θ_vec[2]   # E-cig utility (per mL)
-    α_TE = θ_vec[3]   # Bundle interaction
-    λ_1  = θ_vec[4]   # Non-FDA flavor baseline
-    λ_2  = θ_vec[5]   # Non-FDA flavor × TYA interaction
-    λ_3  = θ_vec[6]   # FDA flavor baseline
-    λ_4  = θ_vec[7]   # FDA flavor × TYA interaction
-    ρ    = θ_vec[8]   # State dependence
-    ω    = θ_vec[9]   # Expenditure coefficient
-    ξ_T  = θ_vec[10]  # Cigarette fixed effect
-    ξ_E  = θ_vec[11]  # E-cig fixed effect
-    ξ_TE = θ_vec[12]  # Bundle fixed effect
+    # Unpack parameters (13 total)
+    α_T   = θ_vec[1]    # Cigarette utility (per pack)
+    α_E   = θ_vec[2]    # E-cig utility (per mL)
+    α_TE  = θ_vec[3]    # Bundle interaction
+    λ_1   = θ_vec[4]    # Non-FDA flavor effect
+    λ_2   = θ_vec[5]    # Non-FDA flavor × TYA interaction
+    λ_3   = θ_vec[6]    # FDA flavor effect
+    λ_4   = θ_vec[7]    # FDA flavor × TYA interaction
+    ρ     = θ_vec[8]    # State dependence
+    ω     = θ_vec[9]    # Expenditure coefficient
+    ξ_T   = θ_vec[10]   # Cigarette fixed effect
+    ξ_E   = θ_vec[11]   # E-cig fixed effect
+    ξ_TE  = θ_vec[12]   # Bundle fixed effect
+    σ_raw = θ_vec[13]   # Nesting parameter (unconstrained)
+
+    # Transform σ to (0, 1) via logistic function
+    σ = one(σ_raw) / (one(σ_raw) + exp(-σ_raw))
+    one_minus_σ = one(σ) - σ
 
     # Initialize
-    neg_LL = zero(eltype(θ_vec))
-    v = Vector{eltype(θ_vec)}(undef, N_J)
+    T = eltype(θ_vec)
+    neg_LL = zero(T)
+    v = Vector{T}(undef, N_J)
+    IV = Vector{T}(undef, N_nests)
 
     # Loop over observations
     for i in 1:N_obs
         tya_i = tya[i]
         y_i = y[i]
 
-        # Compute utilities for all alternatives
+        # Compute base utilities for all alternatives
         for j in 1:N_J
             v[j] = (α_T * c_cig[j] + α_E * c_ecig[j] + α_TE * c_bundle[j]
                    + is_non_fda_flavored[j] * (λ_1 + λ_2 * tya_i)
@@ -283,13 +338,45 @@ function neg_log_likelihood(θ_vec, N_obs, N_J, tya, y,
                    + ξ_T * fe_T[j] + ξ_E * fe_E[j] + ξ_TE * fe_TE[j])
         end
 
-        # Log choice probability: log P(y_i) = v[y_i] - log(Σ_j exp(v[j]))
-        m = maximum(v)
-        s = zero(eltype(v))
-        for j in 1:N_J
-            s += exp(v[j] - m)
+        # Compute inclusive value for each nest: IV_g = logsumexp(v_k/(1-σ) for k in g)
+        for g in 1:N_nests
+            alts_g = nest_alts[g]
+            K_g = length(alts_g)
+
+            # Find max scaled utility for numerical stability
+            max_w = v[alts_g[1]] / one_minus_σ
+            for k in 2:K_g
+                w_k = v[alts_g[k]] / one_minus_σ
+                if w_k > max_w
+                    max_w = w_k
+                end
+            end
+
+            # Compute logsumexp
+            s = zero(T)
+            for k in 1:K_g
+                s += exp(v[alts_g[k]] / one_minus_σ - max_w)
+            end
+            IV[g] = max_w + log(s)
         end
-        log_P = v[y_i] - m - log(s)
+
+        # Compute log denominator: logsumexp((1-σ) × IV_g for all g)
+        max_nest = one_minus_σ * IV[1]
+        for g in 2:N_nests
+            val = one_minus_σ * IV[g]
+            if val > max_nest
+                max_nest = val
+            end
+        end
+        denom_sum = zero(T)
+        for g in 1:N_nests
+            denom_sum += exp(one_minus_σ * IV[g] - max_nest)
+        end
+        log_denom = max_nest + log(denom_sum)
+
+        # Log choice probability: log P(j) = v_j/(1-σ) - σ × IV_{nest(j)} - log_denom
+        g_y = nest_id[y_i]
+        log_P = v[y_i] / one_minus_σ - σ * IV[g_y] - log_denom
 
         neg_LL -= log_P
     end
@@ -302,7 +389,8 @@ nll = θ -> neg_log_likelihood(θ, N_obs, N_J, tya, y,
                               c_cig, c_ecig, c_bundle,
                               is_non_fda_flavored, is_fda_flavored,
                               lag_match, E_obs,
-                              fe_T, fe_E, fe_TE)
+                              fe_T, fe_E, fe_TE,
+                              N_nests, nest_id, nest_alts)
 
 
 #############################
@@ -310,8 +398,8 @@ nll = θ -> neg_log_likelihood(θ, N_obs, N_J, tya, y,
 # (autodiff gradient)
 #############################
 
-# Parameter names (12 parameters)
-param_names = ["α_T", "α_E", "α_TE", "λ_1", "λ_2", "λ_3", "λ_4", "ρ", "ω", "ξ_T", "ξ_E", "ξ_TE"]
+# Parameter names (13 parameters)
+param_names = ["α_T", "α_E", "α_TE", "λ_1", "λ_2", "λ_3", "λ_4", "ρ", "ω", "ξ_T", "ξ_E", "ξ_TE", "σ_raw"]
 N_params = length(param_names)
 
 # Starting values from old model converged estimates
@@ -321,13 +409,14 @@ N_params = length(param_names)
    -0.0021,   # α_TE
     0.852,    # λ_1
     0.703,    # λ_2
-    0.5,      # λ_3 
-    0.5,      # λ_4 
+    0.5,      # λ_3 (new: FDA flavor baseline)
+    0.5,      # λ_4 (new: FDA flavor × TYA)
     2.77,     # ρ
    -0.0055,   # ω
    -3.573,    # ξ_T
    -6.500,    # ξ_E
-   -5.288     # ξ_TE
+   -5.288,    # ξ_TE
+    0.0       # σ_raw (σ = 0.5)
 ]
 
 # Output header
@@ -446,6 +535,11 @@ for k in 1:N_params
     log_msg(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_ad[k], se_ad[k], t_stat))
 end
 
+# Report transformed σ and delta-method SE
+σ_hat_ad = 1.0 / (1.0 + exp(-θ_hat_ad[13]))
+se_σ_ad = σ_hat_ad * (1.0 - σ_hat_ad) * se_ad[13]
+log_msg(@sprintf("\nσ (nesting) = %.4f  (SE = %.4f, t = %.4f)", σ_hat_ad, se_σ_ad, σ_hat_ad / se_σ_ad))
+
 
 #############################
 # Standard Errors via
@@ -535,6 +629,10 @@ for k in 1:N_params
     log_msg(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_ad[k], se_fd[k], t_stat))
 end
 
+# Report transformed σ and delta-method SE
+se_σ_fd = σ_hat_ad * (1.0 - σ_hat_ad) * se_fd[13]
+log_msg(@sprintf("\nσ (nesting) = %.4f  (SE = %.4f, t = %.4f)", σ_hat_ad, se_σ_fd, σ_hat_ad / se_σ_fd))
+
 
 #############################
 # SE Comparison:
@@ -564,7 +662,7 @@ log_msg("\n\n==============================================")
 log_msg("Starting Random Amoeba optimization")
 log_msg("==============================================")
 
-# Starting values from old model converged estimates
+# Starting parameter values as a NamedTuple (old converged values + 0.5 for λ_3, λ_4)
 starting_param_nm = (
     α_T    = 0.0187,
     α_E    = 0.0096,
@@ -577,7 +675,8 @@ starting_param_nm = (
     ω      = -0.0055,
     ξ_T    = -3.573,
     ξ_E    = -6.500,
-    ξ_TE   = -5.288
+    ξ_TE   = -5.288,
+    σ_raw  = 0.0
 )
 
 # Initial simplex deviations for Nelder-Mead
@@ -593,7 +692,8 @@ add_nm = [
     abs(starting_param_nm.ω)    * 0.50,   # ω
     abs(starting_param_nm.ξ_T)  * 0.50,   # ξ_T
     abs(starting_param_nm.ξ_E)  * 0.50,   # ξ_E
-    abs(starting_param_nm.ξ_TE) * 0.50    # ξ_TE
+    abs(starting_param_nm.ξ_TE) * 0.50,   # ξ_TE
+    1.0                                    # σ_raw (nesting parameter)
 ]
 
 # Optimizer settings
@@ -667,6 +767,11 @@ for k in 1:N_params
     t_stat = θ_hat_nm[k] / se_nm_ad[k]
     log_msg(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_nm[k], se_nm_ad[k], t_stat))
 end
+
+# Report transformed σ and delta-method SE
+σ_hat_nm = 1.0 / (1.0 + exp(-θ_hat_nm[13]))
+se_σ_nm_ad = σ_hat_nm * (1.0 - σ_hat_nm) * se_nm_ad[13]
+log_msg(@sprintf("\nσ (nesting) = %.4f  (SE = %.4f, t = %.4f)", σ_hat_nm, se_σ_nm_ad, σ_hat_nm / se_σ_nm_ad))
 
 
 #############################
@@ -752,6 +857,10 @@ for k in 1:N_params
     log_msg(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_nm[k], se_nm[k], t_stat))
 end
 
+# Report transformed σ and delta-method SE
+se_σ_nm = σ_hat_nm * (1.0 - σ_hat_nm) * se_nm[13]
+log_msg(@sprintf("\nσ (nesting) = %.4f  (SE = %.4f, t = %.4f)", σ_hat_nm, se_σ_nm, σ_hat_nm / se_σ_nm))
+
 
 #############################
 # Comparison Table
@@ -773,6 +882,9 @@ end
 # Print neg LL and time comparison
 log_msg(@sprintf("\n%-8s  %12.4f  %10s  %12.4f", "neg LL", Optim.minimum(result_ad), "", opt_value_nm))
 log_msg(@sprintf("%-8s  %12.1f  %10s  %12.1f", "Time(s)", est_ad_elapsed, "", nm_elapsed))
+
+# Print transformed σ comparison
+log_msg(@sprintf("\n%-8s  %12.4f  %10.4f  %12.4f  %10.4f", "σ", σ_hat_ad, se_σ_ad, σ_hat_nm, se_σ_nm))
 
 
 #############################
@@ -799,37 +911,16 @@ log_msg("    λ_1, λ_2, λ_3, λ_4, ρ, ξ_T, ξ_E, ξ_TE: no conversion needed
 log_msg("")
 log_msg("  Note: ω requires E_max from the dynamic model's get_expenditures().")
 log_msg("  The dynamic model computes: ω_std = ω_orig × E_max")
+log_msg("")
+log_msg(@sprintf("  σ (nesting parameter) = %.4f — plug directly into dynamic model (no conversion)", σ_hat_ad))
 
 
 # Print message indicating completion
-log_msg("\nStatic estimation finished at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+log_msg("\nStatic nested logit estimation finished at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
 log_msg("Log saved to: $log_path")
 
 # Close log file
 close(log_io)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

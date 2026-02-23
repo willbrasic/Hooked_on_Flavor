@@ -2,12 +2,17 @@
 # William Brasic
 # The University of Arizona
 # wbrasic97@gmail.com
-# January 2026
+# February 2026
 #
-# This script creates functions specific to the Monte Carlo simulation.
-# These functions handle data simulation from a known DGP and MC-specific
-# versions of estimation functions that work with simulated (in-memory)
-# data rather than CSV files.
+# This script creates functions specific to the Monte Carlo simulation with
+# β (present bias) estimation. These functions handle data simulation from a
+# known DGP and MC-specific versions of estimation functions that work with
+# simulated (in-memory) data rather than CSV files.
+#
+# Changes from 01_MC_Simulation_Functions.jl:
+#   - objective_mc() takes 14-element θ_vec (13 structural + β)
+#   - Extracts β = θ_vec[14], passes θ_vec[1:13] to get_flow_utility
+#   - Passes β and global Π_tya to solve_vfi
 ################################################################################
 
 
@@ -15,7 +20,7 @@
 # Logging
 #############################
 
-# Uses log_io and log_msg() from 01_Functions.jl (included before this file).
+# Uses log_io and log_msg() from 01_Functions_Beta.jl (included before this file).
 
 # Global evaluation counter (reset before each replication)
 eval_count = 0
@@ -301,15 +306,16 @@ function write_param_trace(eval_num, nll, vfi_iters, θ_vec)
 end
 
 """
-MC-specific objective function for the optimizer.
+MC-specific objective function for the optimizer with β estimation.
 
-Same as objective() in 01_Functions.jl but uses simulated data (global variables
-y_sim, tya_state_sim, p_continuous_sim, hh_codes_sim) and MC-specific
+Same as objective() in 01_Functions_Beta.jl but uses simulated data (global
+variables y_sim, tya_state_sim, p_continuous_sim, hh_codes_sim) and MC-specific
 addiction functions that take hh_codes directly instead of reading CSV.
 
+θ_vec contains 14 parameters: 13 structural + β (present bias) as the 14th.
 ψ is fixed (from reduced-form AR(1) estimate) and accessed via the global
-variable set in the calling script. θ_vec contains only the 13 structural
-parameters.
+variable set in the calling script.
+Π_tya (4×4 TYA transition matrix) is accessed as a global variable.
 
 Writes every evaluation's parameter vector to the trace file. Only prints
 verbose log output at eval 1, 10, and every 50th eval thereafter.
@@ -320,7 +326,7 @@ function objective_mc(θ_vec::AbstractVector{<:Real})
     t_eval = time()
     eval_count += 1
 
-    # Economic parameter bounds: α_T,α_E,α_TE,μ ≥ 0; γ,ω ≤ 0.
+    # Economic parameter bounds: α_T,α_E,α_TE,μ ≥ 0; γ,ω ≤ 0; β ∈ [0.01, 1.00].
     # Return penalty without solving VFI to save time.
     in_bounds, violations = check_parameter_bounds(θ_vec, param_names)
     if !in_bounds
@@ -333,12 +339,18 @@ function objective_mc(θ_vec::AbstractVector{<:Real})
         return nll
     end
 
+    # Extract β from θ_vec (14th element)
+    β_current = θ_vec[end]
+
+    # Structural parameters for flow utility (first 13 elements)
+    θ_struct = θ_vec[1:end-1]
+
     # ψ is fixed (global from get_fixed_parameters)
     N_A_current, A_current = get_addiction_space(ψ)
 
-    # Compute flow utility for the current θ (all 13 elements)
+    # Compute flow utility for the current θ (13 structural elements)
     U_current = get_flow_utility(
-        θ_vec, N_J, N_A_current, N_Pcomb, A_current, c_cig, c_ecig, c_bundle, n, is_non_fda_flavored, is_fda_flavored, cat_idx, E
+        θ_struct, N_J, N_A_current, N_Pcomb, A_current, c_cig, c_ecig, c_bundle, n, is_non_fda_flavored, is_fda_flavored, cat_idx, E
     )
 
     # Compute addiction transition brackets for the fixed ψ and A
@@ -349,9 +361,9 @@ function objective_mc(θ_vec::AbstractVector{<:Real})
     # Determine whether to print verbose output for this eval
     print_this = should_print_eval(eval_count)
 
-    # Solve VFI with Π_tya (each evaluation starts fresh from zeros)
+    # Solve VFI with β and TYA transitions (each evaluation starts fresh from zeros)
     V, V_decision_current, vfi_iters, vfi_converged = solve_vfi_sophisticated(
-        N_J, N_A_current, N_P, N_Pcomb, β, δ, U_current,
+        N_J, N_A_current, N_P, N_Pcomb, β_current, δ, U_current,
         a_lower_current, a_upper_current, a_weight_current,
         p_cig_lo, p_cig_hi, p_cig_w,
         p_ecig_lo, p_ecig_hi, p_ecig_w,
