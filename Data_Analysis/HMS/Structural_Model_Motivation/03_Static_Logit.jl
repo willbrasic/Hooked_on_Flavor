@@ -11,7 +11,7 @@
 # utility and does not require value function iteration. Prices enter as
 # continuous observed values rather than discretized grid states.
 #
-# Parameters (10): α_T, α_E, α_TE, λ_1, λ_2, ρ, ω, ξ_T, ξ_E, ξ_TE
+# Parameters (12): α_T, α_E, α_TE, λ_1, λ_2, λ_3, λ_4, ρ, ω, ξ_T, ξ_E, ξ_TE
 #
 # ρ captures state dependence (lagged category choice), motivating the
 # dynamic model: significant ρ → past choices predict current behavior
@@ -35,9 +35,9 @@
 #############################
 
 # Whether we are running on the HPC or not
-hpc = false
+hpc = !Sys.iswindows()
 
-# Load all functions and packages, set ouput path, and set working directory
+# Load all functions and packages, set output path, and set working directory
 using Dates
 timestamp = Dates.format(now(), "yyyy-mm-dd_HHMMSS")
 est_log_name = "Static_Logit_Estimation_Log_$(timestamp).txt"
@@ -49,9 +49,9 @@ if hpc
     output_dir = "./Static_Logit_Results"
     log_path = joinpath(output_dir, est_log_name)
 
-    # Open log file and set global handle
-    est_log_io = open(log_path, "w")
-    est_log("Static estimation started at $(timestamp)")
+    # Open log file and set global log_io handle (defined in 01_Functions.jl)
+    global log_io = open(log_path, "w")
+    log_msg("Static estimation started at $(timestamp)")
 
     # Set working directory to where the data CSVs live
     cd("../Data")
@@ -63,9 +63,9 @@ else
     output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Static_Logit_Results"
     log_path = joinpath(output_dir, est_log_name)
 
-    # Open log file and set global handle
-    est_log_io = open(log_path, "w")
-    est_log("Static estimation started at $(timestamp)")
+    # Open log file and set global log_io handle (defined in 01_Functions.jl)
+    global log_io = open(log_path, "w")
+    log_msg("Static estimation started at $(timestamp)")
 
     # Set working directory to where the data CSVs live
     cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Data")
@@ -92,18 +92,25 @@ N_K, _ = get_category_choices()
 # We need RAW consumption for the static logit so estimates are in original units
 # (utils per pack, utils per mL, etc.) that can be used as starting values in
 # 02_Estimation.jl (which converts them to standardized units).
-N_cig, N_orig_ecig, N_flav_ecig, _, c_cig_std, c_ecig_std, c_bundle_std, c_cig_max, c_ecig_max, c_bundle_max = get_consumption(N_J)
+N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, _, c_cig_std, c_ecig_std, c_bundle_std, c_cig_max, c_ecig_max, c_bundle_max = get_consumption(N_J)
 
 # Convert back to raw consumption (packs, mL, packs×mL)
 c_cig    = c_cig_std    .* c_cig_max
 c_ecig   = c_ecig_std   .* c_ecig_max
 c_bundle = c_bundle_std .* c_bundle_max
 
-# Get category index by alternative: cat_idx[j] ∈ {0, 1, 2, 3, 4, 5}
-cat_idx = get_category_index(N_J, N_cig, N_orig_ecig, N_flav_ecig)
+# Get category index by alternative: cat_idx[j] ∈ {0, 1, 2, 3, 4, 5, 6, 7}
+cat_idx = get_category_index(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig)
 
-# Get flavored indicator by alternative: is_flavored[j] ∈ {true, false}
-is_flavored = get_flavored_indicator(cat_idx)
+# Get non-FDA flavored indicator by alternative: is_non_fda_flavored[j] ∈ {true, false}
+is_non_fda_flavored = get_non_fda_flavored_indicator(cat_idx)
+
+# Get FDA flavored indicator by alternative: is_fda_flavored[j] ∈ {true, false}
+is_fda_flavored = get_fda_flavored_indicator(cat_idx)
+
+# Get price ratios for quantity discounts (ratio = bin median / category median)
+# Bundles inherit the ratio of the closest standalone bin
+ratio_cig, ratio_ecig = get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, c_cig_std, c_ecig_std)
 
 # Get TYA binary indicator for each observation
 _, tya = get_teen_young_adult()
@@ -143,22 +150,22 @@ N_obs = length(y)
 
 # Time elapsed in data prep
 setup_elapsed = time() - t_setup
-est_log("Data loading complete in $(round(setup_elapsed, digits=1))s")
-est_log("Full sample: $N_full")
-est_log("Valid sample (non-missing lag): $N_obs")
-est_log("Alternatives: $N_J")
+log_msg("Data loading complete in $(round(setup_elapsed, digits=1))s")
+log_msg("Full sample: $N_full")
+log_msg("Valid sample (non-missing lag): $N_obs")
+log_msg("Alternatives: $N_J")
 
 # Log consumption ranges (raw values used in estimation)
-est_log("\nConsumption ranges (RAW, used in estimation):")
-est_log("  c_cig:    [$(minimum(c_cig)), $(maximum(c_cig))] packs")
-est_log("  c_ecig:   [$(minimum(c_ecig)), $(maximum(c_ecig))] mL")
-est_log("  c_bundle: [$(minimum(c_bundle)), $(maximum(c_bundle))] packs×mL")
+log_msg("\nConsumption ranges (RAW, used in estimation):")
+log_msg("  c_cig:    [$(minimum(c_cig)), $(maximum(c_cig))] packs")
+log_msg("  c_ecig:   [$(minimum(c_ecig)), $(maximum(c_ecig))] mL")
+log_msg("  c_bundle: [$(minimum(c_bundle)), $(maximum(c_bundle))] packs×mL")
 
 # Log max values (needed if converting estimates to standardized units)
-est_log("\nMax values (for converting to standardized units if needed):")
-est_log("  c_cig_max    = $c_cig_max packs")
-est_log("  c_ecig_max   = $c_ecig_max mL")
-est_log("  c_bundle_max = $c_bundle_max packs×mL (actual max, not c_cig_max × c_ecig_max)")
+log_msg("\nMax values (for converting to standardized units if needed):")
+log_msg("  c_cig_max    = $c_cig_max packs")
+log_msg("  c_ecig_max   = $c_ecig_max mL")
+log_msg("  c_bundle_max = $c_bundle_max packs×mL (actual max, not c_cig_max × c_ecig_max)")
 
 
 #############################
@@ -169,15 +176,15 @@ est_log("  c_bundle_max = $c_bundle_max packs×mL (actual max, not c_cig_max × 
 # Fixed effect category for each alternative:
 #   0 = outside option (no FE)
 #   1 = cigarettes (ξ_T)
-#   2 = e-cigarettes (ξ_E)
-#   3 = bundles (ξ_TE)
+#   2 = any e-cigarettes: orig, non-FDA flav, FDA flav (ξ_E)
+#   3 = any bundles: orig, non-FDA flav, FDA flav (ξ_TE)
 fe_idx = zeros(Int, N_J)
 for j in 1:N_J
     if cat_idx[j] == 1
         fe_idx[j] = 1
-    elseif cat_idx[j] == 2 || cat_idx[j] == 3
+    elseif cat_idx[j] in (2, 3, 4)
         fe_idx[j] = 2
-    elseif cat_idx[j] == 4 || cat_idx[j] == 5
+    elseif cat_idx[j] in (5, 6, 7)
         fe_idx[j] = 3
     end
 end
@@ -190,17 +197,18 @@ fe_TE = fe_idx .== 3
 # TYA indicator for each observation
 tya = [s == 2 ? 1 : 0 for s in tya_state]
 
-# Expenditure matrix: E_obs[i, j] = p_cig[i] * c_cig[j] + p_ecig[i] * c_ecig[j]
-E_obs = p_continuous[:, 1] * c_cig' + p_continuous[:, 2] * c_ecig'
+# Expenditure matrix: E_obs[i, j] = p_cig[i] * ratio_cig[j] * c_cig[j] + p_ecig[i] * ratio_ecig[j] * c_ecig[j]
+# Price ratios capture quantity discounts (lower per-unit prices for larger quantities)
+E_obs = p_continuous[:, 1] * (ratio_cig .* c_cig)' + p_continuous[:, 2] * (ratio_ecig .* c_ecig)'
 
 # Log price ranges
-est_log("\nPrice ranges:")
-est_log("  p_cig:  [$(round(minimum(p_continuous[:, 1]), digits=2)), $(round(maximum(p_continuous[:, 1]), digits=2))] per pack")
-est_log("  p_ecig: [$(round(minimum(p_continuous[:, 2]), digits=2)), $(round(maximum(p_continuous[:, 2]), digits=2))] per mL")
+log_msg("\nPrice ranges:")
+log_msg("  p_cig:  [$(round(minimum(p_continuous[:, 1]), digits=2)), $(round(maximum(p_continuous[:, 1]), digits=2))] per pack")
+log_msg("  p_ecig: [$(round(minimum(p_continuous[:, 2]), digits=2)), $(round(maximum(p_continuous[:, 2]), digits=2))] per mL")
 
 # Log expenditure range
-est_log("\nExpenditure range:")
-est_log("  E_obs:  [$(round(minimum(E_obs), digits=2)), $(round(maximum(E_obs), digits=2))]")
+log_msg("\nExpenditure range:")
+log_msg("  E_obs:  [$(round(minimum(E_obs), digits=2)), $(round(maximum(E_obs), digits=2))]")
 
 # Lagged category match indicator: lag_match[i, j] = 1 if alternative j belongs
 # to the same category the household chose last period.
@@ -225,32 +233,36 @@ end
 Negative log-likelihood for the static logit model.
 Used with L-BFGS via automatic differentiation (autodiff = :forward).
 
-Parameters (10):
-  α_T, α_E, α_TE = consumption utility
-  λ_1, λ_2       = flavor effects
-  ρ              = state dependence (lagged category match)
-  ω              = expenditure coefficient
-  ξ_T, ξ_E, ξ_TE = category fixed effects
+Parameters (12):
+  α_T, α_E, α_TE     = consumption utility
+  λ_1, λ_2           = non-FDA flavor effects (baseline, × TYA)
+  λ_3, λ_4           = FDA flavor effects (baseline, × TYA)
+  ρ                   = state dependence (lagged category match)
+  ω                   = expenditure coefficient
+  ξ_T, ξ_E, ξ_TE     = category fixed effects
 
 Data arrays are passed as arguments so they are typed locals inside the
 function, avoiding global-variable type instability with ForwardDiff.
 """
 function neg_log_likelihood(θ_vec, N_obs, N_J, tya, y,
                             c_cig, c_ecig, c_bundle,
-                            is_flavored, lag_match, E_obs,
+                            is_non_fda_flavored, is_fda_flavored,
+                            lag_match, E_obs,
                             fe_T, fe_E, fe_TE)
 
-    # Unpack parameters (10 total)
+    # Unpack parameters (12 total)
     α_T  = θ_vec[1]   # Cigarette utility (per pack)
     α_E  = θ_vec[2]   # E-cig utility (per mL)
     α_TE = θ_vec[3]   # Bundle interaction
-    λ_1  = θ_vec[4]   # Flavor effect
-    λ_2  = θ_vec[5]   # Flavor × TYA interaction
-    ρ    = θ_vec[6]   # State dependence
-    ω    = θ_vec[7]   # Expenditure coefficient
-    ξ_T  = θ_vec[8]   # Cigarette fixed effect
-    ξ_E  = θ_vec[9]   # E-cig fixed effect
-    ξ_TE = θ_vec[10]  # Bundle fixed effect
+    λ_1  = θ_vec[4]   # Non-FDA flavor baseline
+    λ_2  = θ_vec[5]   # Non-FDA flavor × TYA interaction
+    λ_3  = θ_vec[6]   # FDA flavor baseline
+    λ_4  = θ_vec[7]   # FDA flavor × TYA interaction
+    ρ    = θ_vec[8]   # State dependence
+    ω    = θ_vec[9]   # Expenditure coefficient
+    ξ_T  = θ_vec[10]  # Cigarette fixed effect
+    ξ_E  = θ_vec[11]  # E-cig fixed effect
+    ξ_TE = θ_vec[12]  # Bundle fixed effect
 
     # Initialize
     neg_LL = zero(eltype(θ_vec))
@@ -264,7 +276,8 @@ function neg_log_likelihood(θ_vec, N_obs, N_J, tya, y,
         # Compute utilities for all alternatives
         for j in 1:N_J
             v[j] = (α_T * c_cig[j] + α_E * c_ecig[j] + α_TE * c_bundle[j]
-                   + is_flavored[j] * (λ_1 + λ_2 * tya_i)
+                   + is_non_fda_flavored[j] * (λ_1 + λ_2 * tya_i)
+                   + is_fda_flavored[j] * (λ_3 + λ_4 * tya_i)
                    + ρ * lag_match[i, j]
                    + ω * E_obs[i, j]
                    + ξ_T * fe_T[j] + ξ_E * fe_E[j] + ξ_TE * fe_TE[j])
@@ -287,7 +300,8 @@ end
 # Wrapper function for optimizer (captures all data in closure)
 nll = θ -> neg_log_likelihood(θ, N_obs, N_J, tya, y,
                               c_cig, c_ecig, c_bundle,
-                              is_flavored, lag_match, E_obs,
+                              is_non_fda_flavored, is_fda_flavored,
+                              lag_match, E_obs,
                               fe_T, fe_E, fe_TE)
 
 
@@ -296,32 +310,45 @@ nll = θ -> neg_log_likelihood(θ, N_obs, N_J, tya, y,
 # (autodiff gradient)
 #############################
 
-# Parameter names (10 parameters)
-param_names = ["α_T", "α_E", "α_TE", "λ_1", "λ_2", "ρ", "ω", "ξ_T", "ξ_E", "ξ_TE"]
+# Parameter names (12 parameters)
+param_names = ["α_T", "α_E", "α_TE", "λ_1", "λ_2", "λ_3", "λ_4", "ρ", "ω", "ξ_T", "ξ_E", "ξ_TE"]
 N_params = length(param_names)
 
-# Starting values (all zeros)
-θ_start = zeros(N_params)
+# Starting values from old model converged estimates
+θ_start = [
+    0.0187,   # α_T
+    0.0096,   # α_E
+   -0.0021,   # α_TE
+    0.852,    # λ_1
+    0.703,    # λ_2
+    0.5,      # λ_3 
+    0.5,      # λ_4 
+    2.77,     # ρ
+   -0.0055,   # ω
+   -3.573,    # ξ_T
+   -6.500,    # ξ_E
+   -5.288     # ξ_TE
+]
 
 # Output header
-est_log("\n==============================================")
-est_log("Starting L-BFGS optimization (autodiff)")
-est_log("==============================================")
+log_msg("\n==============================================")
+log_msg("Starting L-BFGS optimization (autodiff)")
+log_msg("==============================================")
 
 # JIT warmup: first ForwardDiff evaluation triggers compilation for Dual types
-est_log("JIT warmup (compiling ForwardDiff)...")
+log_msg("JIT warmup (compiling ForwardDiff)...")
 t_warmup = time()
 
 # Compile function
 nll(θ_start)
-est_log("JIT warmup complete in $(round(time() - t_warmup, digits=1))s")
+log_msg("JIT warmup complete in $(round(time() - t_warmup, digits=1))s")
 
 # Function to log progress every iteration
 function autodiff_callback(state)
 
     # Print results every 10 iterations
     if state.iteration % 10 == 0
-        est_log(@sprintf("  Iter %4d | neg LL = %12.4f | |∇| = %.2e",
+        log_msg(@sprintf("  Iter %4d | neg LL = %12.4f | |∇| = %.2e",
             state.iteration, state.value, state.g_norm))
     end
 
@@ -337,7 +364,7 @@ result_ad = optimize(
     LBFGS(),
     Optim.Options(
         iterations = 1000,
-        f_reltol = 1e-6,
+        f_reltol = 0.0,
         g_tol = 1e-4,
         callback = autodiff_callback
     );
@@ -347,7 +374,7 @@ result_ad = optimize(
 est_ad_elapsed = time() - t_est_ad
 
 # Log final iteration
-est_log(@sprintf("  Iter %4d | neg LL = %12.4f | |∇| = %.2e (final)",
+log_msg(@sprintf("  Iter %4d | neg LL = %12.4f | |∇| = %.2e (final)",
       Optim.iterations(result_ad), Optim.minimum(result_ad), Optim.g_residual(result_ad)))
 
 
@@ -359,14 +386,14 @@ est_log(@sprintf("  Iter %4d | neg LL = %12.4f | |∇| = %.2e (final)",
 θ_hat_ad = Optim.minimizer(result_ad)
 
 # Print results
-est_log("\n\n==============================================")
-est_log("Autodiff L-BFGS Results")
-est_log("==============================================")
-est_log("Converged: $(Optim.converged(result_ad))")
-est_log("Negative log-likelihood: $(round(Optim.minimum(result_ad), digits=4))")
-est_log("Log-likelihood: $(round(-Optim.minimum(result_ad), digits=4))")
-est_log("Iterations: $(Optim.iterations(result_ad))")
-est_log("Total estimation time: $(round(est_ad_elapsed, digits=1))s")
+log_msg("\n\n==============================================")
+log_msg("Autodiff L-BFGS Results")
+log_msg("==============================================")
+log_msg("Converged: $(Optim.converged(result_ad))")
+log_msg("Negative log-likelihood: $(round(Optim.minimum(result_ad), digits=4))")
+log_msg("Log-likelihood: $(round(-Optim.minimum(result_ad), digits=4))")
+log_msg("Iterations: $(Optim.iterations(result_ad))")
+log_msg("Total estimation time: $(round(est_ad_elapsed, digits=1))s")
 
 
 #############################
@@ -375,7 +402,7 @@ est_log("Total estimation time: $(round(est_ad_elapsed, digits=1))s")
 #############################
 
 # SE output file header
-est_log("\nComputing standard errors via ForwardDiff Hessian...")
+log_msg("\nComputing standard errors via ForwardDiff Hessian...")
 t_se_ad = time()
 
 # Compute exact Hessian via automatic differentiation
@@ -392,15 +419,15 @@ se_ad = sqrt.(abs.(diag(V_ad)))
 
 # Show time
 se_ad_elapsed = time() - t_se_ad
-est_log("Standard errors computed in $(round(se_ad_elapsed, digits=1))s")
+log_msg("Standard errors computed in $(round(se_ad_elapsed, digits=1))s")
 
 # Check that H is positive definite (eigenvalues > 0)
 eigvals_H_ad = eigvals(H_ad)
-est_log("Hessian eigenvalues: min = $(round(minimum(eigvals_H_ad), digits=2)), max = $(round(maximum(eigvals_H_ad), digits=2))")
+log_msg("Hessian eigenvalues: min = $(round(minimum(eigvals_H_ad), digits=2)), max = $(round(maximum(eigvals_H_ad), digits=2))")
 if all(eigvals_H_ad .> 0)
-    est_log("Hessian is positive definite (valid MLE)")
+    log_msg("Hessian is positive definite (valid MLE)")
 else
-    est_log("Hessian is NOT positive definite")
+    log_msg("Hessian is NOT positive definite")
 end
 
 
@@ -409,14 +436,14 @@ end
 #############################
 
 # Table header
-est_log("")
-est_log(@sprintf("%-8s  %12s  %10s  %10s", "Parameter", "Estimate", "Std Err", "t-stat"))
-est_log(repeat("-", 55))
+log_msg("")
+log_msg(@sprintf("%-8s  %12s  %10s  %10s", "Parameter", "Estimate", "Std Err", "t-stat"))
+log_msg(repeat("-", 55))
 
 # Print results to table
 for k in 1:N_params
     t_stat = θ_hat_ad[k] / se_ad[k]
-    est_log(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_ad[k], se_ad[k], t_stat))
+    log_msg(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_ad[k], se_ad[k], t_stat))
 end
 
 
@@ -425,7 +452,7 @@ end
 # Finite Differences
 #############################
 
-est_log("\nComputing standard errors via finite differences...")
+log_msg("\nComputing standard errors via finite differences...")
 t_se_fd = time()
 
 # Step size for finite differences
@@ -480,15 +507,15 @@ se_fd = sqrt.(abs.(diag(V_fd)))
 
 # Show time
 se_fd_elapsed = time() - t_se_fd
-est_log("Standard errors computed in $(round(se_fd_elapsed, digits=1))s")
+log_msg("Standard errors computed in $(round(se_fd_elapsed, digits=1))s")
 
 # Check that H is positive definite (eigenvalues > 0)
 eigvals_H_fd = eigvals(H_fd)
-est_log("Hessian eigenvalues: min = $(round(minimum(eigvals_H_fd), digits=2)), max = $(round(maximum(eigvals_H_fd), digits=2))")
+log_msg("Hessian eigenvalues: min = $(round(minimum(eigvals_H_fd), digits=2)), max = $(round(maximum(eigvals_H_fd), digits=2))")
 if all(eigvals_H_fd .> 0)
-    est_log("Hessian is positive definite (valid MLE)")
+    log_msg("Hessian is positive definite (valid MLE)")
 else
-    est_log("Hessian is NOT positive definite")
+    log_msg("Hessian is NOT positive definite")
 end
 
 
@@ -498,14 +525,14 @@ end
 #############################
 
 # Table header
-est_log("")
-est_log(@sprintf("%-8s  %12s  %10s  %10s", "Parameter", "Estimate", "Std Err", "t-stat"))
-est_log(repeat("-", 55))
+log_msg("")
+log_msg(@sprintf("%-8s  %12s  %10s  %10s", "Parameter", "Estimate", "Std Err", "t-stat"))
+log_msg(repeat("-", 55))
 
 # Print results to table
 for k in 1:N_params
     t_stat = θ_hat_ad[k] / se_fd[k]
-    est_log(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_ad[k], se_fd[k], t_stat))
+    log_msg(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_ad[k], se_fd[k], t_stat))
 end
 
 
@@ -515,16 +542,16 @@ end
 #############################
 
 # Output header
-est_log("\n\n==============================================")
-est_log("SE Comparison: Autodiff vs Finite Differences")
-est_log("==============================================")
-est_log(@sprintf("%-8s  %12s  %12s  %12s", "Param", "SE (auto)", "SE (fd)", "Difference"))
-est_log(repeat("-", 55))
+log_msg("\n\n==============================================")
+log_msg("SE Comparison: Autodiff vs Finite Differences")
+log_msg("==============================================")
+log_msg(@sprintf("%-8s  %12s  %12s  %12s", "Param", "SE (auto)", "SE (fd)", "Difference"))
+log_msg(repeat("-", 55))
 
 # Print results
 for k in 1:N_params
     diff = se_ad[k] - se_fd[k]
-    est_log(@sprintf("%-8s  %12.6f  %12.6f  %12.2e", param_names[k], se_ad[k], se_fd[k], diff))
+    log_msg(@sprintf("%-8s  %12.6f  %12.6f  %12.2e", param_names[k], se_ad[k], se_fd[k], diff))
 end
 
 
@@ -533,51 +560,55 @@ end
 #############################
 
 # Print output file header
-est_log("\n\n==============================================")
-est_log("Starting Random Amoeba optimization")
-est_log("==============================================")
+log_msg("\n\n==============================================")
+log_msg("Starting Random Amoeba optimization")
+log_msg("==============================================")
 
-# Starting parameter values as a NamedTuple (all zeros)
+# Starting values from old model converged estimates
 starting_param_nm = (
-    α_T    = 0.0,
-    α_E    = 0.0,
-    α_TE   = 0.0,
-    λ_1    = 0.0,
-    λ_2    = 0.0,
-    ρ      = 0.0,
-    ω      = 0.0,
-    ξ_T    = 0.0,
-    ξ_E    = 0.0,
-    ξ_TE   = 0.0
+    α_T    = 0.0187,
+    α_E    = 0.0096,
+    α_TE   = -0.0021,
+    λ_1    = 0.852,
+    λ_2    = 0.703,
+    λ_3    = 0.5,
+    λ_4    = 0.5,
+    ρ      = 2.77,
+    ω      = -0.0055,
+    ξ_T    = -3.573,
+    ξ_E    = -6.500,
+    ξ_TE   = -5.288
 )
 
-# Initial simplex deviations for each parameter dimension
+# Initial simplex deviations for Nelder-Mead
 add_nm = [
-    0.01,   # α_T
-    0.01,   # α_E
-    0.01,   # α_TE
-    0.5,    # λ_1
-    0.5,    # λ_2
-    1.0,    # ρ
-    0.005,  # ω (expenditure coefficient)
-    1.0,    # ξ_T
-    1.0,    # ξ_E
-    1.0     # ξ_TE
+    abs(starting_param_nm.α_T)  * 0.50,   # α_T
+    abs(starting_param_nm.α_E)  * 0.50,   # α_E
+    abs(starting_param_nm.α_TE) * 0.50,   # α_TE
+    abs(starting_param_nm.λ_1)  * 0.50,   # λ_1
+    abs(starting_param_nm.λ_2)  * 0.50,   # λ_2
+    abs(starting_param_nm.λ_3)  * 0.50,   # λ_3
+    abs(starting_param_nm.λ_4)  * 0.50,   # λ_4
+    abs(starting_param_nm.ρ)    * 0.50,   # ρ
+    abs(starting_param_nm.ω)    * 0.50,   # ω
+    abs(starting_param_nm.ξ_T)  * 0.50,   # ξ_T
+    abs(starting_param_nm.ξ_E)  * 0.50,   # ξ_E
+    abs(starting_param_nm.ξ_TE) * 0.50    # ξ_TE
 ]
 
 # Optimizer settings
-L_nm          = 3    # Outer tries
+L_nm          = 2    # Outer tries
 M_nm          = 2    # Short runs per outer try
-inner_iter_nm = 500  # Iterations per short run
+inner_iter_nm = 100  # Iterations per short run
 
 # Print settings
-est_log("Optimizer settings: L=$L_nm, M=$M_nm, inner_iter=$inner_iter_nm")
+log_msg("Optimizer settings: L=$L_nm, M=$M_nm, inner_iter=$inner_iter_nm")
 
 # Run multi-start Nelder-Mead
 t_nm = time()
 opt_param_nm, opt_value_nm = random_amoeba(
-    nll, starting_param_nm, add_nm, L_nm, M_nm, inner_iter_nm;
-    log_io = est_log_io
+    nll, starting_param_nm, add_nm, L_nm, M_nm;
+    inner_iter = inner_iter_nm
 )
 nm_elapsed = time() - t_nm
 
@@ -585,11 +616,11 @@ nm_elapsed = time() - t_nm
 θ_hat_nm = collect(Float64, values(opt_param_nm))
 
 # Print results header
-est_log("\n\n==============================================")
-est_log("Random Amoeba Results")
-est_log("==============================================")
-est_log("Negative log-likelihood: $(round(opt_value_nm, digits=4))")
-est_log("Total estimation time: $(round(nm_elapsed, digits=1))s")
+log_msg("\n\n==============================================")
+log_msg("Random Amoeba Results")
+log_msg("==============================================")
+log_msg("Negative log-likelihood: $(round(opt_value_nm, digits=4))")
+log_msg("Total estimation time: $(round(nm_elapsed, digits=1))s")
 
 
 #############################
@@ -598,7 +629,7 @@ est_log("Total estimation time: $(round(nm_elapsed, digits=1))s")
 #############################
 
 # SE output file header
-est_log("\nComputing standard errors via ForwardDiff Hessian...")
+log_msg("\nComputing standard errors via ForwardDiff Hessian...")
 t_se_nm_ad = time()
 
 # Compute exact Hessian via automatic differentiation
@@ -615,26 +646,26 @@ se_nm_ad = sqrt.(abs.(diag(V_nm_ad)))
 
 # Show time
 se_nm_ad_elapsed = time() - t_se_nm_ad
-est_log("Standard errors computed in $(round(se_nm_ad_elapsed, digits=1))s")
+log_msg("Standard errors computed in $(round(se_nm_ad_elapsed, digits=1))s")
 
 # Check that H is positive definite (eigenvalues > 0)
 eigvals_H_nm_ad = eigvals(H_nm_ad)
-est_log("Hessian eigenvalues: min = $(round(minimum(eigvals_H_nm_ad), digits=2)), max = $(round(maximum(eigvals_H_nm_ad), digits=2))")
+log_msg("Hessian eigenvalues: min = $(round(minimum(eigvals_H_nm_ad), digits=2)), max = $(round(maximum(eigvals_H_nm_ad), digits=2))")
 if all(eigvals_H_nm_ad .> 0)
-    est_log("Hessian is positive definite (valid MLE)")
+    log_msg("Hessian is positive definite (valid MLE)")
 else
-    est_log("Hessian is NOT positive definite")
+    log_msg("Hessian is NOT positive definite")
 end
 
 # Table header
-est_log("")
-est_log(@sprintf("%-8s  %12s  %10s  %10s", "Parameter", "Estimate", "Std Err", "t-stat"))
-est_log(repeat("-", 50))
+log_msg("")
+log_msg(@sprintf("%-8s  %12s  %10s  %10s", "Parameter", "Estimate", "Std Err", "t-stat"))
+log_msg(repeat("-", 50))
 
 # Print results to table
 for k in 1:N_params
     t_stat = θ_hat_nm[k] / se_nm_ad[k]
-    est_log(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_nm[k], se_nm_ad[k], t_stat))
+    log_msg(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_nm[k], se_nm_ad[k], t_stat))
 end
 
 
@@ -643,8 +674,8 @@ end
 # Finite Differences
 #############################
 
-# Ouput file header
-est_log("\nComputing standard errors via finite differences...")
+# Output file header
+log_msg("\nComputing standard errors via finite differences...")
 t_se_nm = time()
 
 # Step size for finite differences
@@ -699,26 +730,26 @@ se_nm = sqrt.(abs.(diag(V_nm)))
 
 # Show time
 se_nm_elapsed = time() - t_se_nm
-est_log("Standard errors computed in $(round(se_nm_elapsed, digits=1))s")
+log_msg("Standard errors computed in $(round(se_nm_elapsed, digits=1))s")
 
 # Check that H is positive definite (eigenvalues > 0)
 eigvals_H_nm = eigvals(H_nm)
-est_log("Hessian eigenvalues: min = $(round(minimum(eigvals_H_nm), digits=2)), max = $(round(maximum(eigvals_H_nm), digits=2))")
+log_msg("Hessian eigenvalues: min = $(round(minimum(eigvals_H_nm), digits=2)), max = $(round(maximum(eigvals_H_nm), digits=2))")
 if all(eigvals_H_nm .> 0)
-    est_log("Hessian is positive definite (valid MLE)")
+    log_msg("Hessian is positive definite (valid MLE)")
 else
-    est_log("Hessian is NOT positive definite")
+    log_msg("Hessian is NOT positive definite")
 end
 
 # Table header
-est_log("")
-est_log(@sprintf("%-8s  %12s  %10s  %10s", "Parameter", "Estimate", "Std Err", "t-stat"))
-est_log(repeat("-", 50))
+log_msg("")
+log_msg(@sprintf("%-8s  %12s  %10s  %10s", "Parameter", "Estimate", "Std Err", "t-stat"))
+log_msg(repeat("-", 50))
 
 # Print results to table
 for k in 1:N_params
     t_stat = θ_hat_nm[k] / se_nm[k]
-    est_log(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_nm[k], se_nm[k], t_stat))
+    log_msg(@sprintf("%-8s  %12.6f  %10.6f  %10.4f", param_names[k], θ_hat_nm[k], se_nm[k], t_stat))
 end
 
 
@@ -727,21 +758,21 @@ end
 #############################
 
 # Print comparison header
-est_log("\n\n==============================================")
-est_log("L-BFGS vs Random Amoeba Comparison")
-est_log("==============================================")
-est_log(@sprintf("%-8s  %12s  %10s  %12s  %10s", "Param", "L-BFGS", "SE", "Amoeba", "SE"))
-est_log(repeat("-", 65))
+log_msg("\n\n==============================================")
+log_msg("L-BFGS vs Random Amoeba Comparison")
+log_msg("==============================================")
+log_msg(@sprintf("%-8s  %12s  %10s  %12s  %10s", "Param", "L-BFGS", "SE", "Amoeba", "SE"))
+log_msg(repeat("-", 65))
 
 # Print comparison table
 for k in 1:N_params
-    est_log(@sprintf("%-8s  %12.6f  %10.6f  %12.6f  %10.6f",
+    log_msg(@sprintf("%-8s  %12.6f  %10.6f  %12.6f  %10.6f",
         param_names[k], θ_hat_ad[k], se_ad[k], θ_hat_nm[k], se_nm[k]))
 end
 
 # Print neg LL and time comparison
-est_log(@sprintf("\n%-8s  %12.4f  %10s  %12.4f", "neg LL", Optim.minimum(result_ad), "", opt_value_nm))
-est_log(@sprintf("%-8s  %12.1f  %10s  %12.1f", "Time(s)", est_ad_elapsed, "", nm_elapsed))
+log_msg(@sprintf("\n%-8s  %12.4f  %10s  %12.4f", "neg LL", Optim.minimum(result_ad), "", opt_value_nm))
+log_msg(@sprintf("%-8s  %12.1f  %10s  %12.1f", "Time(s)", est_ad_elapsed, "", nm_elapsed))
 
 
 #############################
@@ -749,30 +780,59 @@ est_log(@sprintf("%-8s  %12.1f  %10s  %12.1f", "Time(s)", est_ad_elapsed, "", nm
 # Values Conversion
 #############################
 
-est_log("\n\n==============================================")
-est_log("Dynamic Model Starting Values")
-est_log("==============================================")
-est_log("These estimates are in ORIGINAL units. To use as starting values")
-est_log("in the dynamic model (which uses standardized data), multiply by max:")
-est_log("")
-est_log("  Standardization factors:")
-est_log("    c_cig_max    = $c_cig_max packs")
-est_log("    c_ecig_max   = $c_ecig_max mL")
-est_log("    c_bundle_max = $c_bundle_max packs×mL (actual max, not c_cig_max × c_ecig_max)")
-est_log("")
-est_log("  Conversion formulas (using L-BFGS estimates):")
-est_log(@sprintf("    α_T_std  = %.4f × %.1f = %.4f", θ_hat_ad[1], c_cig_max, θ_hat_ad[1] * c_cig_max))
-est_log(@sprintf("    α_E_std  = %.4f × %.1f = %.4f", θ_hat_ad[2], c_ecig_max, θ_hat_ad[2] * c_ecig_max))
-est_log(@sprintf("    α_TE_std = %.4f × %.1f = %.4f", θ_hat_ad[3], c_bundle_max, θ_hat_ad[3] * c_bundle_max))
-est_log("    λ_1, λ_2, ρ, ξ_T, ξ_E, ξ_TE: no conversion needed")
-est_log("")
-est_log("  Note: ω requires E_max from the dynamic model's get_expenditures().")
-est_log("  The dynamic model computes: ω_std = ω_orig × E_max")
+log_msg("\n\n==============================================")
+log_msg("Dynamic Model Starting Values")
+log_msg("==============================================")
+log_msg("These estimates are in ORIGINAL units. To use as starting values")
+log_msg("in the dynamic model (which uses standardized data), multiply by max:")
+log_msg("")
+log_msg("  Standardization factors:")
+log_msg("    c_cig_max    = $c_cig_max packs")
+log_msg("    c_ecig_max   = $c_ecig_max mL")
+log_msg("    c_bundle_max = $c_bundle_max packs×mL (actual max, not c_cig_max × c_ecig_max)")
+log_msg("")
+log_msg("  Conversion formulas (using L-BFGS estimates):")
+log_msg(@sprintf("    α_T_std  = %.4f × %.1f = %.4f", θ_hat_ad[1], c_cig_max, θ_hat_ad[1] * c_cig_max))
+log_msg(@sprintf("    α_E_std  = %.4f × %.1f = %.4f", θ_hat_ad[2], c_ecig_max, θ_hat_ad[2] * c_ecig_max))
+log_msg(@sprintf("    α_TE_std = %.4f × %.1f = %.4f", θ_hat_ad[3], c_bundle_max, θ_hat_ad[3] * c_bundle_max))
+log_msg("    λ_1, λ_2, λ_3, λ_4, ρ, ξ_T, ξ_E, ξ_TE: no conversion needed")
+log_msg("")
+log_msg("  Note: ω requires E_max from the dynamic model's get_expenditures().")
+log_msg("  The dynamic model computes: ω_std = ω_orig × E_max")
 
 
 # Print message indicating completion
-est_log("\nStatic estimation finished at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
-est_log("Log saved to: $log_path")
+log_msg("\nStatic estimation finished at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+log_msg("Log saved to: $log_path")
 
 # Close log file
-close(est_log_io)
+close(log_io)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -14,21 +14,7 @@
 # Logging
 #############################
 
-# Global log file handle (set by 02_Model_Validation.jl before any logging)
-val_log_io = nothing
-
-"""
-Write a message to the validation log file and flush immediately.
-Also prints to stdout as a fallback.
-"""
-function val_log(msg::String)
-    global val_log_io
-    println(msg)
-    if val_log_io !== nothing
-        println(val_log_io, msg)
-        flush(val_log_io)
-    end
-end
+# Uses log_io and log_msg() from 01_Functions.jl (included before this file).
 
 
 #############################
@@ -101,14 +87,15 @@ Aggregate alternative-level predicted probabilities into category-level shares.
 
 Category mapping:
   0 = outside option, 1 = cigarettes, 2 = original e-cig,
-  3 = flavored e-cig, 4 = original bundle, 5 = flavored bundle
+  3 = non-FDA flavored e-cig, 4 = FDA flavored e-cig,
+  5 = original bundle, 6 = non-FDA flavored bundle, 7 = FDA flavored bundle
 
 For actual shares, computes the fraction of observations choosing each category.
 For predicted shares, computes the mean predicted probability for each category.
 
 Returns:
-- actual_shares:    Vector{Float64} of length 6 (categories 0-5)
-- predicted_shares: Vector{Float64} of length 6 (categories 0-5)
+- actual_shares:    Vector{Float64} of length 8 (categories 0-7)
+- predicted_shares: Vector{Float64} of length 8 (categories 0-7)
 """
 function compute_category_shares(
     y::AbstractVector{<:Integer},
@@ -117,7 +104,7 @@ function compute_category_shares(
     obs_mask::AbstractVector{Bool}
 )
 
-    N_cats = 6  # categories 0-5
+    N_cats = 8  # categories 0-7
 
     # Subset observations
     y_sub = y[obs_mask]
@@ -150,7 +137,7 @@ end
 #############################
 
 """
-Compute actual and predicted shares at the alternative level (all 21 alternatives).
+Compute actual and predicted shares at the alternative level (all 40 alternatives).
 
 Returns:
 - actual_shares:    Vector{Float64} of length N_J

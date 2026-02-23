@@ -259,7 +259,11 @@ dt_tobacco_households[, .N, by=.(household_code, purchase_year)][, .N, by = hous
 dt_households[, uniqueN(household_code), by = .(purchase_year)]
 dt_tobacco_households[, uniqueN(household_code), by = .(purchase_year)]
 
-
+# Number of households where teen or young adult presence changes over time
+dt_households[
+  , .(n_unique = uniqueN(teen_or_young_adult_present)),
+  by = household_code
+][n_unique > 1, .N]
 
 
 

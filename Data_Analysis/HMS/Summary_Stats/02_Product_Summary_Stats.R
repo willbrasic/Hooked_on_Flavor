@@ -67,8 +67,42 @@ dt_ecig[, uniqueN(upc)]
 dt_monthly_cig[, median(total_packs, na.rm = TRUE)]
 dt_monthly_ecig[, median(total_mL, na.rm = TRUE)]
 
+# Fraction of e-cig household-purchase months with FDA authorized vs non-FDA
+dt_monthly_ecig[, .(
+  n_ecig_months = .N,
+  n_fda_authorized = sum(fda_authorized_ecig == 1),
+  n_non_fda = sum(fda_authorized_ecig == 0),
+  frac_fda_authorized = mean(fda_authorized_ecig == 1),
+  frac_non_fda = mean(fda_authorized_ecig == 0)
+)]
 
+# FDA authorized fraction by year
+dt_monthly_ecig[, .(
+  n_ecig_months = .N,
+  frac_fda_authorized = mean(fda_authorized_ecig == 1),
+  frac_non_fda = mean(fda_authorized_ecig == 0)
+), keyby = .(flavored_ecig, purchase_year)]
 
+# FDA authorized fraction by year, flavor, and teen/young adult presence
+dt_monthly_ecig[, .(
+  n_ecig_months = .N,
+  frac_fda_authorized = mean(fda_authorized_ecig == 1),
+  frac_non_fda = mean(fda_authorized_ecig == 0)
+), keyby = .(teen_or_young_adult_present, flavored_ecig, purchase_year)]
+
+# FDA authorized fraction by flavor type (among e-cig months)
+dt_monthly_ecig[, .(
+  n_ecig_months = .N,
+  frac_fda_authorized = mean(fda_authorized_ecig == 1)
+), keyby = flavored_ecig]
+
+# Among FDA authorized months: median mL consumed
+dt_monthly_ecig[fda_authorized_ecig == 1, median(total_mL, na.rm = TRUE)]
+dt_monthly_ecig[fda_authorized_ecig == 0, median(total_mL, na.rm = TRUE)]
+
+# Share of unique e-cig households that ever purchase FDA authorized
+dt_monthly_ecig[, .(ever_fda = as.integer(any(fda_authorized_ecig == 1))),
+                by = household_code][, mean(ever_fda)]
 
 
 

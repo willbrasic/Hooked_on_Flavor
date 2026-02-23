@@ -64,6 +64,9 @@ dt_monthly <- dt[, c(lapply(.SD, function(x) sum(x, na.rm = TRUE)),
                       number_of_unique_segments = uniqueN(segment_cd),
                       total_original_mL = sum(total_mL[ecig == 1 & original_ecig == 1], na.rm = TRUE),
                       total_flavored_mL = sum(total_mL[ecig == 1 & flavored_ecig == 1], na.rm = TRUE),
+                      total_fda_authorized_mL = sum(total_mL[ecig == 1 & fda_authorized_ecig == 1], na.rm = TRUE),
+                      total_fda_flavored_mL = sum(total_mL[ecig == 1 & flavored_ecig == 1 & fda_authorized_ecig == 1], na.rm = TRUE),
+                      total_non_fda_flavored_mL = sum(total_mL[ecig == 1 & flavored_ecig == 1 & fda_authorized_ecig == 0], na.rm = TRUE),
                       total_price_paid = sum(total_price_paid, na.rm = TRUE),
                       total_pack_price_paid = sum(total_price_paid[cig == 1], na.rm = TRUE),
                       total_mL_price_paid = sum(total_price_paid[ecig == 1], na.rm = TRUE))),
@@ -74,7 +77,8 @@ setcolorder(dt_monthly, c("number_of_purchases", "number_of_unique_categories", 
             after = "purchase_month")
 setcolorder(dt_monthly, c("consumption_in_cigs", "consumption_in_packs"),
             after = "number_of_unique_segments")
-setcolorder(dt_monthly, c("total_original_mL", "total_flavored_mL"),
+setcolorder(dt_monthly, c("total_original_mL", "total_flavored_mL", "total_fda_authorized_mL",
+                          "total_fda_flavored_mL", "total_non_fda_flavored_mL"),
             after = "total_mL")
 
 # Create total nicotine consumed and absorbed columns
@@ -94,11 +98,15 @@ dt_monthly[, `:=` (cig = fifelse(total_packs > 0, 1, 0),
                    )]
 setcolorder(dt_monthly, c("cig", "ecig"), after = "number_of_unique_segments")
 
-# Indicator for of household flavor purchases purchase
+# Indicator for of household flavor purchases 
 dt_monthly[, `:=` (original_ecig = fifelse(total_original_mL > 0, 1, 0),
-                   flavored_ecig = fifelse(total_flavored_mL > 0, 1, 0)
+                   flavored_ecig = fifelse(total_flavored_mL > 0, 1, 0),
+                   fda_authorized_ecig = fifelse(total_fda_authorized_mL > 0, 1, 0),
+                   fda_flavored_ecig = fifelse(total_fda_flavored_mL > 0, 1, 0),
+                   non_fda_flavored_ecig = fifelse(total_non_fda_flavored_mL > 0, 1, 0)
                    )]
-setcolorder(dt_monthly, c("original_ecig", "flavored_ecig"), after = "ecig")
+setcolorder(dt_monthly, c("original_ecig", "flavored_ecig", "fda_authorized_ecig",
+                          "fda_flavored_ecig", "non_fda_flavored_ecig"), after = "ecig")
 
 # Household-year combinations that actually exist for a given household
 hh_years <- unique(dt_monthly[, .(household_code, purchase_year)])
@@ -180,6 +188,32 @@ dt_monthly[
             total_mL, 0)
   )
 ]
+
+# Zero out FDA/non-FDA flavored mL when original won the resolution
+dt_monthly[flavored_ecig == 0, `:=`(
+  total_fda_flavored_mL = 0,
+  total_non_fda_flavored_mL = 0,
+  fda_flavored_ecig = 0,
+  non_fda_flavored_ecig = 0
+)]
+
+# Resolve FDA vs non-FDA within flavored months
+dt_monthly[
+  flavored_ecig == 1 & fda_flavored_ecig == 1 & non_fda_flavored_ecig == 1,
+  c("fda_flavored_ecig", "non_fda_flavored_ecig",
+    "total_fda_flavored_mL", "total_non_fda_flavored_mL") := list(
+    as.integer(total_fda_flavored_mL >= total_non_fda_flavored_mL),
+    as.integer(total_fda_flavored_mL <  total_non_fda_flavored_mL),
+    fifelse(total_fda_flavored_mL >= total_non_fda_flavored_mL, total_flavored_mL, 0),
+    fifelse(total_fda_flavored_mL <  total_non_fda_flavored_mL, total_flavored_mL, 0)
+  )
+]
+
+# When only one type is present, assign all flavored mL to that type
+dt_monthly[flavored_ecig == 1 & fda_flavored_ecig == 1 & non_fda_flavored_ecig == 0,
+           total_fda_flavored_mL := total_flavored_mL]
+dt_monthly[flavored_ecig == 1 & fda_flavored_ecig == 0 & non_fda_flavored_ecig == 1,
+           total_non_fda_flavored_mL := total_flavored_mL]
 
 # Define (cig, e-cig) category
 dt_monthly[, `:=`(

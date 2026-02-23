@@ -11,7 +11,7 @@
 #   2. Seeds RNG with s for reproducibility
 #   3. Simulates household panel data from the true V_decision
 #   4. Estimates θ via multi-start Nelder-Mead (objective_mc)
-#   5. Writes one result file: MC_Rep_<s>.txt
+#   5. Writes one result file: MC_Rep_<s>.csv
 #
 # After all tasks complete, run 03_MC_Aggregate_Results.jl to combine.
 #
@@ -90,38 +90,43 @@ timestamp = Dates.format(now(), "yyyy-mm-dd_HHMMSS")
 s_str = lpad(s, ndigits(100), '0')
 
 # Per-replication output files
-results_path = joinpath(output_dir, "$(s_str)_MC_Rep_Results_$timestamp.txt")
+results_path = joinpath(output_dir, "$(s_str)_MC_Rep_Results_$timestamp.csv")
 log_path     = joinpath(output_dir, "$(s_str)_MC_Rep_Log_$timestamp.txt")
-trace_path   = joinpath(output_dir, "$(s_str)_MC_Rep_Parameters_$timestamp.txt")
+trace_path   = joinpath(output_dir, "$(s_str)_MC_Rep_Parameters_$timestamp.csv")
 
-# Open log file and set global handle
-global mc_log_io = open(log_path, "w")
-mc_log("MC Replication $s started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
-mc_log("Random seed: $s")
+# Open log file for writing (log_io is defined as a global in 01_Functions.jl)
+log_io = open(log_path, "w")
+
+# Print and log MC replication start time
+log_msg("MC Replication $s started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+log_msg("Random seed: $s")
 
 
 #############################
 # Initialize fixed parameters
 #############################
 
-# Load fixed parameters (ψ is now estimated; only β and δ are fixed)
-_, β, δ = get_fixed_parameters();
+# Load fixed parameters:
+#   ψ = addiction decay rate (fixed from reduced-form AR(1) estimate)
+#   β = present bias (fixed at 1.0; exponential discounting in the base model)
+#   δ = monthly discount factor (fixed at 0.99)
+ψ, β, δ = get_fixed_parameters();
 
 
 #############################
 # State Spaces and Choices
 #############################
 
-# Start timing
+# Start timer for data prep
 t_setup = time();
 
-# Addiction grid is created later using the true ψ from θ_true (defined below).
+# Addiction grid is created later using the fixed ψ from get_fixed_parameters.
 # N_J, prices, consumption, etc. do not depend on ψ, so load them first.
 
-# Get number of alternatives (N_J) and choice matrix (J)
+# Get number of observations (N_HHT), number of alternatives (N_J), and choice matrix J
 _, N_J, J = get_product_choices();
 
-# Get number of categories excluding outside option (N_K)
+# Get number of product categories excluding the outside option
 N_K, _ = get_category_choices();
 
 
@@ -130,40 +135,51 @@ N_K, _ = get_category_choices();
 #############################
 
 # Get consumption vectors by alternative (STANDARDIZED by max)
-# c_bundle is standardized by its own max (not c_cig_max × c_ecig_max)
-N_cig, N_orig_ecig, N_flav_ecig, _, c_cig, c_ecig, c_bundle, c_cig_max, c_ecig_max, c_bundle_max = get_consumption(N_J);
+# c_bundle is standardized by its own max (not c_cig_max × c_ecig_max) for reasonable α_TE scaling
+# Max values are needed for rescaling parameter estimates to original units
+N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, _, c_cig, c_ecig, c_bundle, c_cig_max, c_ecig_max, c_bundle_max = get_consumption(N_J);
 
 # Get nicotine vector by alternative (STANDARDIZED by max)
+# n_max is the raw max value for rescaling estimates
 n, n_max = get_nicotine(N_J);
 
-# Get category index by alternative: cat_idx[j] ∈ {0, 1, 2, 3, 4, 5}
-cat_idx = get_category_index(N_J, N_cig, N_orig_ecig, N_flav_ecig);
+# Get category index by alternative
+cat_idx = get_category_index(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig);
 
-# Get flavored indicator by alternative: is_flavored[j] ∈ {true, false}
-is_flavored = get_flavored_indicator(cat_idx);
+# Get non-FDA flavored indicator by alternative: is_non_fda_flavored[j] ∈ {0, 1}
+is_non_fda_flavored = get_non_fda_flavored_indicator(cat_idx);
+
+# Get FDA flavored indicator by alternative: is_fda_flavored[j] ∈ {0, 1}
+is_fda_flavored = get_fda_flavored_indicator(cat_idx);
 
 
 #############################
 # Price Space
 #############################
 
-# Get pricing grid (N_P points per category)
+# Get pricing grid: N_P points per category, P is N_P × 2 (cig, ecig)
 N_P, P = get_pricing_spaces();
 
-# Get all price combinations: N_Pcomb = N_P^2, Pcomb is N_Pcomb × 2
+# Get all price combinations
 N_Pcomb, Pcomb = get_pricing_spaces_combination(N_K, N_P, P);
 
-# Get expenditure matrix (STANDARDIZED by max)
-E, E_max = get_expenditures(N_J, N_Pcomb, c_cig, c_ecig, c_cig_max, c_ecig_max, Pcomb);
+# Get price ratios for quantity discount adjustment (price per unit varies by bin size)
+ratio_cig, ratio_ecig = get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, c_cig, c_ecig);
 
-# Get price transitions from Halton draws: T[m, r, k]
+# Get expenditure matrix E[p, j] = p_cig(p) * c_cig[j] + p_ecig(p) * c_ecig[j]
+# STANDARDIZED by E_max; E_max is the raw max value for rescaling estimates
+E, E_max = get_expenditures(N_J, N_Pcomb, c_cig, c_ecig, c_cig_max, c_ecig_max, Pcomb, ratio_cig, ratio_ecig);
+
+# Get Halton draw price transitions: T[m, r, k] where m = price state, r = draw, k = category
 T = get_transitions(N_K);
 
-# Pre-compute price transition brackets and interpolation weights
+# Pre-compute bilinear interpolation brackets and weights for price transitions
+# Returns 6 matrices (M × R): lo/hi grid indices and weights for each category
 p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_transitions(N_P, P, T);
 
+# Log data setup completion time
 setup_elapsed = time() - t_setup;
-mc_log("Data loading complete in $(round(setup_elapsed, digits=1))s");
+log_msg("Data loading complete in $(round(setup_elapsed, digits=1))s");
 
 
 #############################
@@ -171,47 +187,58 @@ mc_log("Data loading complete in $(round(setup_elapsed, digits=1))s");
 # (for design-based MC)
 #############################
 
-# Load real prices, TYA, and household codes from the actual data.
+# Load real household identifiers for design-based MC simulation
 # The MC simulation conditions on real observables (prices, TYA, panel structure)
 # and only simulates choices from the model. This provides realistic
 # cross-sectional price variation needed to identify all parameters.
-real_hh_codes = get_hh_codes()
-_, real_tya = get_teen_young_adult()
-real_tya_state = get_tya_state(real_tya)
-_, real_p_continuous = map_prices_to_grid(N_P, P, Pcomb)
+real_hh_codes = get_hh_codes();
 
-N_HH_real = length(unique(real_hh_codes))
-N_obs_real = length(real_hh_codes)
-mc_log("Real data loaded: $N_HH_real households, $N_obs_real observations")
+# Get 4-state TYA classification for each observation (states 1-4)
+# State 1: No TYA, stable; State 2: No TYA, approaching
+# State 3: TYA present, stable; State 4: TYA present, ending soon
+real_tya_state = get_tya_states();
+
+# Load 4×4 monthly TYA transition matrix Π_tya[s, s'] = P(TYA' = s' | TYA = s)
+# Used in VFI to integrate over anticipated TYA state changes
+Π_tya = get_tya_transitions();
+
+# Map observed household prices to continuous values for likelihood interpolation
+_, real_p_continuous = map_prices_to_grid(N_P, P, Pcomb);
+
+N_HH_real = length(unique(real_hh_codes));
+N_obs_real = length(real_hh_codes);
+
+# Print and log real data summary
+log_msg("Real data loaded: $N_HH_real households, $N_obs_real observations")
 
 
 #############################
 # True Parameters
 #############################
 
-# True structural parameters for the DGP (STANDARDIZED units)
-#
-# The MC simulation uses real observed prices (from Prices.csv) rather than
-# simulating from the AR(1) process. This provides realistic cross-sectional
-# price variation (σ_between ≈ $1.22 for cig), which is necessary to identify
-# ω separately from α_T and α_E.
-#
-# μ and γ are dynamic-only parameters (no static logit counterpart).
-# γ < 0 represents withdrawal cost (standard addiction model).
-# ψ is the addiction decay rate (estimated jointly with structural parameters).
+# Static logit estimates (ORIGINAL units — utils per pack, per mL, etc.)
+# These are converted to standardized units using the max values from the data.
+# μ, γ have no static counterpart and are set to reasonable starting values.
+# ψ is fixed from the reduced-form AR(1) estimate (not estimated).
+α_T_orig  =  0.0187
+α_E_orig  =  0.0096
+α_TE_orig = -0.0021
+ω_orig    = -0.0055
+
 θ_true = (
-    α_T  =  0.46,     # ≈ 0.0077 × c_cig_max
-    α_E  =  0.37,     # ≈ 0.0072 × c_ecig_max
-    α_TE =  0.50,     # scaled down from 0.0094 × c_bundle_max = 9.57
-    λ_1  =  0.67,
-    λ_2  =  0.41,
-    μ    =  0.05,
-    γ    = -0.05,
-    ω    = -1.94,     # ≈ -0.0032 × E_max
-    ξ_T  = -3.61,
-    ξ_E  = -5.46,
-    ξ_TE = -6.05,
-    ψ    =  0.5      # addiction decay rate (94% per month)
+    α_T  = α_T_orig * c_cig_max,
+    α_E  = α_E_orig * c_ecig_max,
+    α_TE = α_TE_orig * c_bundle_max,
+    λ_1  =  0.852,
+    λ_2  =  0.703,
+    λ_3  =  0.5,       # FDA flavor baseline (no conversion)
+    λ_4  =  0.5,       # FDA flavor × TYA (no conversion)
+    μ    =  0.10,      # no static counterpart
+    γ    = -0.10,      # no static counterpart
+    ω    = ω_orig * E_max,
+    ξ_T  = -3.573,
+    ξ_E  = -6.500,
+    ξ_TE = -5.288
 );
 
 # Convert to vector for VFI
@@ -223,20 +250,28 @@ param_names = collect(String, string.(keys(θ_true)))
 # Number of parameters
 N_params = length(θ_true)
 
+# Save θ_true for aggregate script (each rep overwrites, but values are identical)
+θ_true_df = DataFrame(parameter = param_names, value = θ_true_vec)
+CSV.write(joinpath(output_dir, "MC_True_Parameters.csv"), θ_true_df)
+
+# Print and log true parameters
+log_msg("θ_true (standardized): $θ_true")
+
 
 #############################
 # MC Settings
 #############################
 
 # Optimizer settings (same across all replications)
-L          = 2       # Number of random restarts (outer tries)
+L          = 2        # Number of random restarts (outer tries)
 M          = 2        # Short Nelder-Mead runs per outer try (inner tries)
 inner_iter = 100      # Max iterations per short run
 
-mc_log("MC settings: s=$s, N_HH=$N_HH_real, N_obs=$N_obs_real, L=$L, M=$M, inner_iter=$inner_iter")
-mc_log("True parameters:")
+# Print and log MC settings and true parameters
+log_msg("MC settings: s=$s, N_HH=$N_HH_real, N_obs=$N_obs_real, L=$L, M=$M, inner_iter=$inner_iter")
+log_msg("True parameters:")
 for k in 1:N_params
-    mc_log("  $(param_names[k]) = $(θ_true_vec[k])")
+    log_msg("  $(param_names[k]) = $(θ_true_vec[k])")
 end
 
 
@@ -244,36 +279,39 @@ end
 # Solve DGP Value Function
 #############################
 
-mc_log("\n===================================")
-mc_log("Solving VFI at true parameters...")
-mc_log("===================================")
+# Print and log DGP VFI header
+log_msg("\n===================================")
+log_msg("Solving VFI at true parameters...")
+log_msg("===================================")
 
 t_vfi = time()
 
-# Create addiction grid using the true ψ from θ_true
-ψ_true = θ_true.ψ
-N_A, A = get_addiction_space(ψ_true)
+# Get number of addiction states (N_A = 20) and the normalized addiction grid A
+N_A, A = get_addiction_space(ψ);
 
-# Compute flow utility at true θ (first 11 elements, excluding ψ)
+# Compute flow utility at true θ (all 13 elements)
 U_true = get_flow_utility(
-    θ_true_vec[1:end-1], N_J, N_A, N_Pcomb, A, c_cig, c_ecig, c_bundle, n, is_flavored, cat_idx, E
-)
+    θ_true_vec, N_J, N_A, N_Pcomb, A, c_cig, c_ecig, c_bundle, n, is_non_fda_flavored, is_fda_flavored, cat_idx, E
+);
 
-# Compute addiction transition brackets at true ψ
+# Compute addiction transition brackets at fixed ψ
 a_lower_true, a_upper_true, a_weight_true = precompute_addiction_transitions(
-    N_J, N_A, ψ_true, A, n
-)
+    N_J, N_A, ψ, A, n
+);
 
 # Solve VFI at true parameters (cold start)
-_, V_decision_true, vfi_iters_true, _ = solve_vfi(
+_, V_decision_true, vfi_iters_true, _ = solve_vfi_sophisticated(
     N_J, N_A, N_P, N_Pcomb, β, δ, U_true,
     a_lower_true, a_upper_true, a_weight_true,
     p_cig_lo, p_cig_hi, p_cig_w,
-    p_ecig_lo, p_ecig_hi, p_ecig_w
-)
+    p_ecig_lo, p_ecig_hi, p_ecig_w,
+    Π_tya
+);
 
 vfi_elapsed = time() - t_vfi
-mc_log("DGP VFI converged in $vfi_iters_true iterations ($(round(vfi_elapsed, digits=1))s)")
+
+# Print and log DGP VFI result
+log_msg("DGP VFI converged in $vfi_iters_true iterations ($(round(vfi_elapsed, digits=1))s)")
 
 
 #############################
@@ -282,37 +320,42 @@ mc_log("DGP VFI converged in $vfi_iters_true iterations ($(round(vfi_elapsed, di
 #############################
 
 # Starting values for estimation (STANDARDIZED units)
+# Deliberately offset from θ_true to test optimizer recovery.
+# ψ is fixed and not estimated.
 starting_param = (
-    α_T  =  0.1,
-    α_E  =  0.1,
+    α_T  =  0.5,
+    α_E  =  0.3,
     α_TE =  0.1,
-    λ_1  =  0.1,
-    λ_2  =  0.1,
+    λ_1  =  0.4,
+    λ_2  =  0.3,
+    λ_3  =  0.3,      # FDA flavor baseline (offset from truth)
+    λ_4  =  0.2,      # FDA flavor × TYA (offset from truth)
     μ    =  0.1,      # no static counterpart
     γ    = -0.1,      # no static counterpart
     ω    = -1.0,
-    ξ_T  = -1.0,
-    ξ_E  = -2.0,
-    ξ_TE = -3.0,
-    ψ    =  0.3      
+    ξ_T  = -2.0,
+    ξ_E  = -4.0,
+    ξ_TE = -3.0
 );
 
 # Initial simplex deviations for Nelder-Mead
 # Scaled to ~50% of the absolute value of each starting parameter;
 # μ and γ get larger deviations since they have no informed starting values.
+# ψ is fixed and not included.
 add = [
     abs(starting_param.α_T)  * 0.50,   # α_T
     abs(starting_param.α_E)  * 0.50,   # α_E
     abs(starting_param.α_TE) * 0.50,   # α_TE
     abs(starting_param.λ_1)  * 0.50,   # λ_1
     abs(starting_param.λ_2)  * 0.50,   # λ_2
+    abs(starting_param.λ_3)  * 0.50,   # λ_3
+    abs(starting_param.λ_4)  * 0.50,   # λ_4
     abs(starting_param.μ)    * 1.00,   # μ
     abs(starting_param.γ)    * 1.00,   # γ
     abs(starting_param.ω)    * 0.50,   # ω
     abs(starting_param.ξ_T)  * 0.50,   # ξ_T
     abs(starting_param.ξ_E)  * 0.50,   # ξ_E
-    abs(starting_param.ξ_TE) * 0.50,   # ξ_TE
-    0.20                                # ψ: ±0.10 around starting value
+    abs(starting_param.ξ_TE) * 0.50    # ξ_TE
 ];
 
 
@@ -320,13 +363,14 @@ add = [
 # Run Single Replication
 #############################
 
-mc_log("\n===================================")
-mc_log("Running Replication $s")
-mc_log("===================================\n")
+# Print and log replication header
+log_msg("\n===================================")
+log_msg("Running Replication $s")
+log_msg("===================================\n")
 
 # Open parameter trace file and write header
 global param_trace_io = open(trace_path, "w")
-trace_header = "sim\touter_try\tinner_run\teval\tNLL\tVFI_iters\t" * join(param_names, "\t")
+trace_header = "sim,outer_try,inner_run,eval,NLL,VFI_iters," * join(param_names, ",")
 println(param_trace_io, trace_header)
 flush(param_trace_io)
 
@@ -336,11 +380,25 @@ t_rep = time()
 t_sim = time()
 global y_sim, tya_state_sim, p_continuous_sim, hh_codes_sim
 y_sim, tya_state_sim, p_continuous_sim, hh_codes_sim = simulate_data(
-    V_decision_true, ψ_true, N_J, N_P, A, P, n,
+    V_decision_true, ψ, N_J, N_P, A, P, n,
     real_p_continuous, real_tya_state, real_hh_codes
 )
 sim_elapsed = time() - t_sim
-mc_log("Data simulation: $(length(y_sim)) obs in $(round(sim_elapsed, digits=2))s")
+
+# Print and log data simulation result
+log_msg("Data simulation: $(length(y_sim)) obs in $(round(sim_elapsed, digits=2))s")
+
+# Print and log simulated choice shares by category
+N_sim = length(y_sim)
+cat_counts = zeros(Int, 8)  # cats 0-7
+for i in 1:N_sim
+    cat_counts[cat_idx[y_sim[i]] + 1] += 1
+end
+log_msg("Simulated choice shares:")
+cat_labels = ["outside", "cig", "orig_ecig", "non_fda_flav_ecig", "fda_flav_ecig", "orig_bundle", "non_fda_flav_bundle", "fda_flav_bundle"]
+for c in 1:8
+    log_msg(@sprintf("  %-22s  %6d / %d  (%5.2f%%)", cat_labels[c], cat_counts[c], N_sim, 100.0 * cat_counts[c] / N_sim))
+end
 
 # Reset evaluation counter and set replication number
 global eval_count = 0
@@ -349,11 +407,13 @@ global current_replication = s
 # Estimate θ via multi-start Nelder-Mead
 t_est = time()
 opt_param, opt_value = random_amoeba(
-    objective_mc, starting_param, add, L, M, inner_iter;
-    log_io = mc_log_io
+    objective_mc, starting_param, add, L, M;
+    inner_iter = inner_iter
 )
 est_elapsed = time() - t_est
-mc_log("Estimation complete: $eval_count evaluations in $(round(est_elapsed, digits=1))s")
+
+# Print and log estimation result
+log_msg("Estimation complete: $eval_count evaluations in $(round(est_elapsed, digits=1))s")
 
 # Get estimated parameters as vector
 θ_hat = collect(Float64, values(opt_param))
@@ -365,24 +425,28 @@ rep_elapsed = time() - t_rep
 # Save Results
 #############################
 
-# Write per-replication result file
+# Save per-replication results to a CSV file
 open(results_path, "w") do io
-    println(io, "S\tNLL\t" * join(param_names, "\t"))
-    println(io, "$s\t$(@sprintf("%.10f", opt_value))\t" * join([@sprintf("%.10f", θ_hat[k]) for k in 1:N_params], "\t"))
+    println(io, "S,NLL," * join(param_names, ","))
+    println(io, "$s,$(@sprintf("%.10f", opt_value))," * join([@sprintf("%.10f", θ_hat[k]) for k in 1:N_params], ","))
 end
 
-mc_log("\nReplication $s results ($(round(rep_elapsed, digits=1))s total):")
-mc_log("  Negative log-likelihood: $(round(opt_value, digits=4))")
-mc_log(@sprintf("  %-8s  %12s  %12s  %12s", "Param", "True", "Estimated", "Diff"))
-mc_log("  " * repeat("-", 50))
+# Print and log replication results table
+log_msg("\nReplication $s results ($(round(rep_elapsed, digits=1))s total):")
+log_msg("  Negative log-likelihood: $(round(opt_value, digits=4))")
+log_msg(@sprintf("  %-8s  %12s  %12s  %12s", "Param", "True", "Estimated", "Diff"))
+log_msg("  " * repeat("-", 50))
 for k in 1:N_params
     diff = θ_hat[k] - θ_true_vec[k]
-    mc_log(@sprintf("  %-8s  %12.6f  %12.6f  %12.6f", param_names[k], θ_true_vec[k], θ_hat[k], diff))
+    log_msg(@sprintf("  %-8s  %12.6f  %12.6f  %12.6f", param_names[k], θ_true_vec[k], θ_hat[k], diff))
 end
 
-mc_log("\nResults saved to: $results_path")
-mc_log("MC Replication $s finished at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+# Print and log results save location
+log_msg("\nResults saved to: $results_path")
 
-# Close log and trace files
+# Print and log replication finished message
+log_msg("MC Replication $s finished at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+
+# Close the log and trace file handles
 close(param_trace_io)
-close(mc_log_io)
+close(log_io)

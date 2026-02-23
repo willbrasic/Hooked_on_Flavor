@@ -15,24 +15,10 @@
 # Logging
 #############################
 
-# Global log file handle (set by 03_MC_Sim.jl before any logging)
-mc_log_io = nothing
+# Uses log_io and log_msg() from 01_Functions.jl (included before this file).
 
 # Global evaluation counter (reset before each replication)
 eval_count = 0
-
-"""
-Write a message to the MC log file and flush immediately.
-Also prints to stdout as a fallback.
-"""
-function mc_log(msg::String)
-    global mc_log_io
-    println(msg)
-    if mc_log_io !== nothing
-        println(mc_log_io, msg)
-        flush(mc_log_io)
-    end
-end
 
 
 #############################
@@ -102,7 +88,8 @@ function simulate_data(
             probs = exp_v ./ sum(exp_v)
             j = categorical_sample(probs)
             y_prelim[i] = j
-            a_h = clamp((1 - ψ) * a_h + n[j], A[1], A[end])
+            # a_h is ã (normalized addiction); n[j] is n_std (standardized nicotine)
+            a_h = clamp((1 - ψ) * a_h + ψ * n[j], A[1], A[end])
         end
     end
 
@@ -124,7 +111,8 @@ function simulate_data(
             probs = exp_v ./ sum(exp_v)
             j = categorical_sample(probs)
             y_sim[i] = j
-            a_h = clamp((1 - ψ) * a_h + n[j], A[1], A[end])
+            # a_h is ã (normalized addiction); n[j] is n_std (standardized nicotine)
+            a_h = clamp((1 - ψ) * a_h + ψ * n[j], A[1], A[end])
         end
     end
 
@@ -151,7 +139,7 @@ function get_initial_addiction_stock_mc(
     n::AbstractVector{<:Real},
     y::AbstractVector{<:Integer},
     hh_codes::AbstractVector{<:Integer};
-    max_iter::Integer = 50,
+    max_iter::Integer = 500,
     tol::Real = 1e-6
 )
 
@@ -175,6 +163,7 @@ function get_initial_addiction_stock_mc(
     # Track iterations until convergence for each household
     hh_idx = 1
     iters_to_convergence = zeros(Int, length(hh_obs))
+    n_not_converged = 0
 
     # Loop over households
     for (hh, obs_indices) in hh_obs
@@ -198,14 +187,19 @@ function get_initial_addiction_stock_mc(
                 break
             end
 
-            # Safety net: warn if fixed-point iteration did not converge
+            # Track non-convergence
             if iter == max_iter
-                println("WARNING: Fixed-point iteration did not converge for household $hh after $max_iter iterations (change = $change)")
                 iters_to_convergence[hh_idx] = max_iter
+                n_not_converged += 1
             end
         end
 
         hh_idx += 1
+    end
+
+    # Print single summary if any households did not converge
+    if n_not_converged > 0
+        log_msg("WARNING: Initial addiction fixed-point did not converge for $n_not_converged / $(length(hh_obs)) households (max_iter=$max_iter, tol=$tol)")
     end
 
     return a0, maximum(iters_to_convergence)
@@ -274,12 +268,12 @@ end
 y_sim              = Int[]
 tya_state_sim      = Int[]
 p_continuous_sim   = zeros(Float64, 0, 2)
-hh_codes_sim = Int[]
+hh_codes_sim       = Int[]
 
-# Global file handle for parameter trace (set by 02_MC_Simulation.jl)
+# Global file handle for parameter trace (set by the calling simulation script)
 param_trace_io = nothing
 
-# Global replication number (updated by MC loop in 02_MC_Simulation.jl)
+# Global replication number (updated by MC loop)
 current_replication = 0
 
 """
@@ -301,8 +295,8 @@ function write_param_trace(eval_num, nll, vfi_iters, θ_vec)
         return
     end
     inner_str = ra_inner_run == 0 ? "long" : string(ra_inner_run)
-    θ_str = join([@sprintf("%.10f", x) for x in θ_vec], "\t")
-    println(param_trace_io, "$current_replication\t$ra_outer_try\t$inner_str\t$eval_num\t$(@sprintf("%.6f", nll))\t$vfi_iters\t$θ_str")
+    θ_str = join([@sprintf("%.10f", x) for x in θ_vec], ",")
+    println(param_trace_io, "$current_replication,$ra_outer_try,$inner_str,$eval_num,$(@sprintf("%.6f", nll)),$vfi_iters,$θ_str")
     flush(param_trace_io)
 end
 
@@ -313,8 +307,9 @@ Same as objective() in 01_Functions.jl but uses simulated data (global variables
 y_sim, tya_state_sim, p_continuous_sim, hh_codes_sim) and MC-specific
 addiction functions that take hh_codes directly instead of reading CSV.
 
-ψ is the last element of θ_vec. The first 11 elements are the structural
-parameters passed to get_flow_utility.
+ψ is fixed (from reduced-form AR(1) estimate) and accessed via the global
+variable set in the calling script. θ_vec contains only the 13 structural
+parameters.
 
 Writes every evaluation's parameter vector to the trace file. Only prints
 verbose log output at eval 1, 10, and every 50th eval thereafter.
@@ -325,44 +320,42 @@ function objective_mc(θ_vec::AbstractVector{<:Real})
     t_eval = time()
     eval_count += 1
 
-    # Economic parameter bounds: α_T,α_E,α_TE,μ ≥ 0; γ,ω ≤ 0; ψ ∈ (0.01, 0.99).
+    # Economic parameter bounds: α_T,α_E,α_TE,μ ≥ 0; γ,ω ≤ 0.
     # Return penalty without solving VFI to save time.
     in_bounds, violations = check_parameter_bounds(θ_vec, param_names)
     if !in_bounds
         nll = 1e14
         write_param_trace(eval_count, nll, 0, θ_vec)
         if should_print_eval(eval_count)
-            mc_log(@sprintf("  Eval %d | PENALTY (bounds: %s) | time = %.1fs",
+            log_msg(@sprintf("  Eval %d | PENALTY (bounds: %s) | time = %.1fs",
                 eval_count, violations, time() - t_eval))
         end
         return nll
     end
 
-    # Extract ψ from the parameter vector (last element)
-    ψ_current = θ_vec[end]
+    # ψ is fixed (global from get_fixed_parameters)
+    N_A_current, A_current = get_addiction_space(ψ)
 
-    # Recompute addiction grid for the current ψ (grid spans [0, 1/ψ])
-    N_A_current, A_current = get_addiction_space(ψ_current)
-
-    # Recompute flow utility for the current θ (first 11 elements)
+    # Compute flow utility for the current θ (all 13 elements)
     U_current = get_flow_utility(
-        θ_vec[1:end-1], N_J, N_A_current, N_Pcomb, A_current, c_cig, c_ecig, c_bundle, n, is_flavored, cat_idx, E
+        θ_vec, N_J, N_A_current, N_Pcomb, A_current, c_cig, c_ecig, c_bundle, n, is_non_fda_flavored, is_fda_flavored, cat_idx, E
     )
 
-    # Recompute addiction transition brackets for the current ψ and A
+    # Compute addiction transition brackets for the fixed ψ and A
     a_lower_current, a_upper_current, a_weight_current = precompute_addiction_transitions(
-        N_J, N_A_current, ψ_current, A_current, n
+        N_J, N_A_current, ψ, A_current, n
     )
 
     # Determine whether to print verbose output for this eval
     print_this = should_print_eval(eval_count)
 
-    # Solve VFI (each evaluation starts fresh from zeros)
-    V, V_decision_current, vfi_iters, vfi_converged = solve_vfi(
+    # Solve VFI with Π_tya (each evaluation starts fresh from zeros)
+    V, V_decision_current, vfi_iters, vfi_converged = solve_vfi_sophisticated(
         N_J, N_A_current, N_P, N_Pcomb, β, δ, U_current,
         a_lower_current, a_upper_current, a_weight_current,
         p_cig_lo, p_cig_hi, p_cig_w,
-        p_ecig_lo, p_ecig_hi, p_ecig_w;
+        p_ecig_lo, p_ecig_hi, p_ecig_w,
+        Π_tya;
         verbose = print_this
     )
 
@@ -373,16 +366,16 @@ function objective_mc(θ_vec::AbstractVector{<:Real})
 
         # Always log penalties and write to trace
         θ_str = join([@sprintf("%.6f", x) for x in θ_vec], ", ")
-        mc_log(@sprintf("  Eval %d | PENALTY (VFI not converged) | VFI iters = %d | time = %.1fs | θ = [%s]",
+        log_msg(@sprintf("  Eval %d | PENALTY (VFI not converged) | VFI iters = %d | time = %.1fs | θ = [%s]",
             eval_count, vfi_iters, elapsed, θ_str))
         write_param_trace(eval_count, nll, vfi_iters, θ_vec)
         return nll
     end
 
-    # Recompute addiction trajectories using MC-specific functions
-    a0_current, _ = get_initial_addiction_stock_mc(ψ_current, A_current, n, y_sim, hh_codes_sim)
+    # Compute addiction trajectories using MC-specific functions with fixed ψ
+    a0_current, _ = get_initial_addiction_stock_mc(ψ, A_current, n, y_sim, hh_codes_sim)
     _, a_continuous_current = simulate_addiction_trajectories_mc(
-        N_A_current, ψ_current, A_current, n, y_sim, a0_current, hh_codes_sim
+        N_A_current, ψ, A_current, n, y_sim, a0_current, hh_codes_sim
     )
 
     # Compute log-likelihood via trilinear interpolation at continuous states
@@ -400,7 +393,7 @@ function objective_mc(θ_vec::AbstractVector{<:Real})
     # Only print verbose output at eval 1, 10, and every 50th
     if print_this
         θ_str = join([@sprintf("%.6f", x) for x in θ_vec], ", ")
-        mc_log(@sprintf("  Eval %d | NLL = %.4f | VFI iters = %d | time = %.1fs | θ = [%s]",
+        log_msg(@sprintf("  Eval %d | NLL = %.4f | VFI iters = %d | time = %.1fs | θ = [%s]",
             eval_count, nll, vfi_iters, elapsed, θ_str))
     end
 

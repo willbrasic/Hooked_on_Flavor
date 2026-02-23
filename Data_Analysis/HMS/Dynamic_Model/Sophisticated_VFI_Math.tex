@@ -1,0 +1,163 @@
+\documentclass[a4paper, 11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1.25in]{geometry}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{booktabs}
+
+\newcommand{\E}{\mathbb{E}}
+
+\begin{document}
+
+\section*{Sophisticated VFI Math (Matches Code Notation)}
+
+\noindent This note writes out the full math implemented in
+\texttt{solve\_vfi\_sophisticated} in
+\texttt{01\_Functions.jl} and \texttt{01\_Functions\_Beta.jl}
+using the exact code objects:
+\[
+V_{\text{now}},\; V_{\text{next}},\; V_d,\; V_e,\; U.
+\]
+
+\subsection*{1. Environment and State}
+
+\noindent At each period, the state is
+\[
+s=(\tau,a,p),\qquad \tau\in\{1,\dots,N_{\text{TYA}}\},\quad a\in\{1,\dots,N_A\},\quad p\in\{1,\dots,N_{P\text{comb}}\},
+\]
+and action \(j\in\mathcal{J}=\{1,\dots,N_J\}\).
+
+\noindent Conditional on \((s,j)\), next-period addiction and prices are continuous, then projected onto grids by interpolation:
+\begin{align}
+a'_{j,a} &\in [a^{\text{grid}}_{\text{lo}(j,a)}, a^{\text{grid}}_{\text{hi}(j,a)}], \\
+\omega_a(j,a) &\in [0,1], \\
+\tilde p^{(r)} &\mapsto (p_{\ell\ell}^{(r)},p_{\ell h}^{(r)},p_{h\ell}^{(r)},p_{hh}^{(r)}),\quad r=1,\dots,R,\\
+(\omega_{\ell\ell}^{(r)},\omega_{\ell h}^{(r)},\omega_{h\ell}^{(r)},\omega_{hh}^{(r)}) &=
+\big((1-\omega_c^{(r)})(1-\omega_e^{(r)}),(1-\omega_c^{(r)})\omega_e^{(r)},\omega_c^{(r)}(1-\omega_e^{(r)}),\omega_c^{(r)}\omega_e^{(r)}\big).
+\end{align}
+
+\noindent In the beta file (\texttt{01\_Functions\_Beta.jl}), \(\tau\) follows a Markov chain \(\Pi_{\tau}\).
+In the non-beta file (\texttt{01\_Functions.jl}), continuation is computed separately by current \(\tau\)-index (equivalent to identity transition across TYA states in this step).
+
+\subsection*{2. Continuation Value in Code Form}
+
+\noindent For a given current state \(s=(\tau,a,p)\) and action \(j\), define low/high addiction continuation terms:
+\begin{align}
+\widetilde{EV}_{\tau,\text{lo}}(j,a,p;V_{\text{now}})
+&= \frac{1}{R}\sum_{r=1}^R
+\sum_{q\in\{\ell\ell,\ell h,h\ell,hh\}}
+\omega_q^{(r)} V_{\text{now}}(\tau,\text{lo}(j,a),p_q^{(r)}),\\
+\widetilde{EV}_{\tau,\text{hi}}(j,a,p;V_{\text{now}})
+&= \frac{1}{R}\sum_{r=1}^R
+\sum_{q\in\{\ell\ell,\ell h,h\ell,hh\}}
+\omega_q^{(r)} V_{\text{now}}(\tau,\text{hi}(j,a),p_q^{(r)}).
+\end{align}
+
+\noindent Interpolate across addiction:
+\begin{align}
+\widehat{EV}_{\tau}(j,a,p;V_{\text{now}})
+= (1-\omega_a(j,a))\,\widetilde{EV}_{\tau,\text{lo}}(j,a,p;V_{\text{now}})
++ \omega_a(j,a)\,\widetilde{EV}_{\tau,\text{hi}}(j,a,p;V_{\text{now}}).
+\end{align}
+
+\noindent Then aggregate across next-period TYA states (beta version):
+\begin{align}
+EV_j(s;V_{\text{now}})
+= \sum_{\tau'=1}^{N_{\text{TYA}}}\Pr(\tau'|\tau)\,\widehat{EV}_{\tau'}(j,a,p;V_{\text{now}}).
+\label{eq:ev-main}
+\end{align}
+\noindent In the non-beta version, this reduces to
+\[
+EV_j(s;V_{\text{now}})=\widehat{EV}_{\tau}(j,a,p;V_{\text{now}}).
+\]
+
+\subsection*{3. Sophisticated Choice-Specific Values}
+
+\noindent For each \((s,j)\), the code computes:
+\begin{align}
+V_d(s,j) &= U(s,j) + \beta\delta\,EV_j(s;V_{\text{now}}), \label{eq:vd-main}\\
+V_e(s,j) &= U(s,j) + \delta\,EV_j(s;V_{\text{now}}). \label{eq:ve-main}
+\end{align}
+
+\noindent \(V_d\) is the decision index for current choice, while \(V_e\) is the experienced deterministic value used in welfare aggregation.
+
+\subsection*{4. CCPs and Bellman Operator}
+
+\noindent With Type-I extreme value shocks (logit scale normalized to 1), CCPs are:
+\begin{align}
+\sigma_j(s;V_{\text{now}})
+= \frac{\exp(V_d(s,j))}{\sum_{\ell\in\mathcal{J}}\exp(V_d(s,\ell))}. \label{eq:ccp-main}
+\end{align}
+
+\noindent The sophisticated Bellman operator \(T^{\text{soph}}\) used in VFI is:
+\begin{align}
+\big(T^{\text{soph}}V_{\text{now}}\big)(s)
+= \sum_{j\in\mathcal{J}}\sigma_j(s;V_{\text{now}})\,V_e(s,j)
+- \sum_{j\in\mathcal{J}}\sigma_j(s;V_{\text{now}})\log \sigma_j(s;V_{\text{now}}).
+\label{eq:Tsoph}
+\end{align}
+
+\noindent Hence the iterate update is exactly
+\[
+V_{\text{next}}(s)=\big(T^{\text{soph}}V_{\text{now}}\big)(s).
+\]
+
+\subsection*{5. Markov Perfect Equilibrium (MPE) Representation}
+
+\noindent Define a Markov strategy profile of selves \(\sigma(\cdot)\) over state \(s\), where each period-\(t\) self chooses \(j\) as a function of current \(s_t\). In the stationary problem, a sophisticated MPE is a pair \((V^\star,\sigma^\star)\) such that:
+\begin{align}
+\sigma^\star_j(s)
+&= \frac{\exp\!\left(U(s,j)+\beta\delta\,\E[V^\star(s')|s,j]\right)}
+{\sum_{\ell\in\mathcal{J}}\exp\!\left(U(s,\ell)+\beta\delta\,\E[V^\star(s')|s,\ell]\right)}, \label{eq:mpe-sigma}\\
+V^\star(s)
+&= \sum_{j\in\mathcal{J}}\sigma^\star_j(s)\left(U(s,j)+\delta\,\E[V^\star(s')|s,j]\right)
+- \sum_{j\in\mathcal{J}}\sigma^\star_j(s)\log \sigma^\star_j(s). \label{eq:mpe-v}
+\end{align}
+Equation \eqref{eq:mpe-sigma} is sequential optimality of each self given continuation \(V^\star\),
+and \eqref{eq:mpe-v} is consistency of the induced value function.
+This is exactly the fixed point solved by \eqref{eq:Tsoph}.
+
+\subsection*{6. Naive Operator (for Comparison)}
+
+\noindent In \texttt{solve\_vfi\_naive}, one computes:
+\begin{align}
+V_{\text{choice}}(s,j)=U(s,j)+\delta\,EV_j(s;V_{\text{now}}),
+\end{align}
+and updates with logsumexp:
+\begin{align}
+V_{\text{next}}(s)=\log\!\left(\sum_{j\in\mathcal{J}}\exp(V_{\text{choice}}(s,j))\right).
+\label{eq:naive-main}
+\end{align}
+After convergence, the code reports
+\[
+V_{\text{decision}}=(1-\beta)U+\beta V_{\text{choice}}
+\]
+for CCP evaluation under naive beliefs.
+
+\subsection*{7. \(\beta=1\) Nesting}
+
+\noindent If \(\beta=1\), then \(V_d=V_e\), so \(\sigma=\text{softmax}(V_e)\).
+Substituting into \eqref{eq:Tsoph} gives:
+\[
+\sum_j \sigma_j V_e(j)-\sum_j \sigma_j\log\sigma_j
+= \log\sum_j \exp(V_e(j)),
+\]
+so sophisticated and naive operators coincide.
+
+\subsection*{8. Convergence, Fixed-Point Consistency, and Normalization}
+
+\noindent The code runs a Jacobi update with sup-norm check:
+\[
+\|V_{\text{next}}-V_{\text{now}}\|_\infty < \varepsilon.
+\]
+After convergence, it recomputes choice-specific arrays once using final \(V_{\text{now}}\):
+\begin{itemize}
+    \item naive: recompute \(V_{\text{choice}}\),
+    \item sophisticated: recompute \(V_d\).
+\end{itemize}
+This ensures returned policy objects are exactly aligned with the converged fixed point.
+
+\noindent Logit scale is normalized to 1 throughout code, so EV1 shock variance is \(\pi^2/6\), and the additive Euler-constant term is omitted (which is innocuous for CCPs and likelihood differences).
+
+\end{document}

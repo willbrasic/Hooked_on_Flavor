@@ -100,51 +100,54 @@ dt_product_choices <- dt[, .(
   # Outside option
   outside_option = fifelse(cig == 0 & ecig == 0 & cig_ecig == 0, 1, 0),
   
-  # # Cigarette quantity alternatives (cigs only: total_mL == 0)
-  # cig_1        = fifelse(total_packs == 1  & total_mL == 0, 1, 0),
-  # cig_2        = fifelse(total_packs == 2  & total_mL == 0, 1, 0),
-  # cig_3to4     = fifelse(total_packs >= 3  & total_packs <= 4  & total_mL == 0, 1, 0),
-  # cig_5to9     = fifelse(total_packs >= 5  & total_packs <= 9  & total_mL == 0, 1, 0),
-  # cig_10       = fifelse(total_packs == 10 & total_mL == 0, 1, 0),
-  # cig_11to19   = fifelse(total_packs >= 11 & total_packs <= 19 & total_mL == 0, 1, 0),
-  # cig_20       = fifelse(total_packs == 20 & total_mL == 0, 1, 0),
-  # cig_21to29   = fifelse(total_packs >= 21 & total_packs <= 29 & total_mL == 0, 1, 0),
-  # cig_30       = fifelse(total_packs == 30 & total_mL == 0, 1, 0),
-  # cig_31to39   = fifelse(total_packs >= 31 & total_packs <= 39 & total_mL == 0, 1, 0),
-  # cig_40       = fifelse(total_packs == 40 & total_mL == 0, 1, 0),
-  # cig_41plus   = fifelse(total_packs >= 41 & total_mL == 0, 1, 0),
-  
   # Cigarette quantity alternatives (cigs only: total_mL == 0)
-  cig_1to2     = fifelse((total_packs == 1 | total_packs == 2) & total_mL == 0, 1, 0),
-  cig_3to10    = fifelse(total_packs >= 3  & total_packs <= 10  & total_mL == 0, 1, 0),
-  cig_11to20   = fifelse(total_packs >= 11 & total_packs <= 20 & total_mL == 0, 1, 0),
-  cig_21to30   = fifelse(total_packs >= 21 & total_packs <= 30 & total_mL == 0, 1, 0),
-  cig_31to40   = fifelse(total_packs >= 31 & total_packs <= 40 & total_mL == 0, 1, 0),
+  cig_1        = fifelse(total_packs == 1  & total_mL == 0, 1, 0),
+  cig_2        = fifelse(total_packs == 2  & total_mL == 0, 1, 0),
+  cig_3to4     = fifelse(total_packs >= 3  & total_packs <= 4  & total_mL == 0, 1, 0),
+  cig_5to9     = fifelse(total_packs >= 5  & total_packs <= 9  & total_mL == 0, 1, 0),
+  cig_10       = fifelse(total_packs == 10 & total_mL == 0, 1, 0),
+  cig_11to19   = fifelse(total_packs >= 11 & total_packs <= 19 & total_mL == 0, 1, 0),
+  cig_20       = fifelse(total_packs == 20 & total_mL == 0, 1, 0),
+  cig_21to29   = fifelse(total_packs >= 21 & total_packs <= 29 & total_mL == 0, 1, 0),
+  cig_30       = fifelse(total_packs == 30 & total_mL == 0, 1, 0),
+  cig_31to39   = fifelse(total_packs >= 31 & total_packs <= 39 & total_mL == 0, 1, 0),
+  cig_40       = fifelse(total_packs == 40 & total_mL == 0, 1, 0),
   cig_41plus   = fifelse(total_packs >= 41 & total_mL == 0, 1, 0),
   
   # Original e-cigarette alternatives (e-cig only: total_packs == 0)
-  orig_ecig_1to10  = fifelse(total_original_mL > 0  & total_original_mL <= 10 & total_packs == 0, 1, 0),
-  orig_ecig_10to30 = fifelse(total_original_mL > 10 & total_original_mL <= 30 & total_packs == 0, 1, 0),
-  orig_ecig_30plus = fifelse(total_original_mL > 30 & total_packs == 0, 1, 0),
-  
-  # Flavored e-cigarette alternatives (e-cig only: total_packs == 0)
-  flav_ecig_0to10  = fifelse(total_flavored_mL >  0  & total_flavored_mL <= 10 & total_packs == 0, 1, 0),
-  flav_ecig_10to30 = fifelse(total_flavored_mL > 10  & total_flavored_mL <= 30 & total_packs == 0, 1, 0),
-  flav_ecig_30plus = fifelse(total_flavored_mL > 30 & total_packs == 0, 1, 0),
-  
-  # # Bundles (any quantities)
-  # bundle_orig = fifelse(total_packs > 0 & total_original_mL > 0, 1, 0),
-  # bundle_flav = fifelse(total_packs > 0 & total_flavored_mL > 0, 1, 0)
-  
-  # Bundles differentiated by quantity
-  bundle_orig_lo_lo  = fifelse(total_packs > 0 & total_packs <= 20 & total_original_mL > 0 & total_original_mL <= 15, 1, 0),
-  bundle_orig_lo_hi  = fifelse(total_packs > 0 & total_packs <= 20 & total_original_mL > 15, 1, 0),
-  bundle_orig_hi_lo  = fifelse(total_packs > 20 & total_original_mL > 0 & total_original_mL <= 15, 1, 0),
-  bundle_orig_hi_hi  = fifelse(total_packs > 20 & total_original_mL > 15, 1, 0),
-  bundle_flav_lo_lo  = fifelse(total_packs > 0 & total_packs <= 20 & total_flavored_mL > 0 & total_flavored_mL <= 15, 1, 0),
-  bundle_flav_lo_hi  = fifelse(total_packs > 0 & total_packs <= 20 & total_flavored_mL > 15, 1, 0),
-  bundle_flav_hi_lo  = fifelse(total_packs > 20 & total_flavored_mL > 0 & total_flavored_mL <= 15, 1, 0),
-  bundle_flav_hi_hi  = fifelse(total_packs > 20 & total_flavored_mL > 15, 1, 0)
+  orig_ecig_0to5    = fifelse(total_original_mL > 0  & total_original_mL <= 5  & total_packs == 0, 1, 0),
+  orig_ecig_5to10   = fifelse(total_original_mL > 5  & total_original_mL <= 10 & total_packs == 0, 1, 0),
+  orig_ecig_10to15  = fifelse(total_original_mL > 10 & total_original_mL <= 15 & total_packs == 0, 1, 0),
+  orig_ecig_15to20  = fifelse(total_original_mL > 15 & total_original_mL <= 20 & total_packs == 0, 1, 0),
+  orig_ecig_20to30  = fifelse(total_original_mL > 20 & total_original_mL <= 30 & total_packs == 0, 1, 0),
+  orig_ecig_30to50  = fifelse(total_original_mL > 30 & total_original_mL <= 50 & total_packs == 0, 1, 0),
+  orig_ecig_50plus  = fifelse(total_original_mL > 50 & total_packs == 0, 1, 0),
+
+  # Non-FDA flavored e-cigarette alternatives (e-cig only: total_packs == 0)
+  non_fda_flav_ecig_0to5    = fifelse(total_non_fda_flavored_mL > 0  & total_non_fda_flavored_mL <= 5  & total_packs == 0, 1, 0),
+  non_fda_flav_ecig_5to10   = fifelse(total_non_fda_flavored_mL > 5  & total_non_fda_flavored_mL <= 10 & total_packs == 0, 1, 0),
+  non_fda_flav_ecig_10to15  = fifelse(total_non_fda_flavored_mL > 10 & total_non_fda_flavored_mL <= 15 & total_packs == 0, 1, 0),
+  non_fda_flav_ecig_15to20  = fifelse(total_non_fda_flavored_mL > 15 & total_non_fda_flavored_mL <= 20 & total_packs == 0, 1, 0),
+  non_fda_flav_ecig_20to30  = fifelse(total_non_fda_flavored_mL > 20 & total_non_fda_flavored_mL <= 30 & total_packs == 0, 1, 0),
+  non_fda_flav_ecig_30to50  = fifelse(total_non_fda_flavored_mL > 30 & total_non_fda_flavored_mL <= 50 & total_packs == 0, 1, 0),
+  non_fda_flav_ecig_50plus  = fifelse(total_non_fda_flavored_mL > 50 & total_packs == 0, 1, 0),
+
+  # FDA-authorized flavored e-cigarette alternatives (e-cig only: total_packs == 0)
+  fda_flav_ecig_0to5    = fifelse(total_fda_flavored_mL > 0  & total_fda_flavored_mL <= 5  & total_packs == 0, 1, 0),
+  fda_flav_ecig_5to10   = fifelse(total_fda_flavored_mL > 5  & total_fda_flavored_mL <= 10 & total_packs == 0, 1, 0),
+  fda_flav_ecig_10to15  = fifelse(total_fda_flavored_mL > 10 & total_fda_flavored_mL <= 15 & total_packs == 0, 1, 0),
+  fda_flav_ecig_15to20  = fifelse(total_fda_flavored_mL > 15 & total_fda_flavored_mL <= 20 & total_packs == 0, 1, 0),
+  fda_flav_ecig_20to30  = fifelse(total_fda_flavored_mL > 20 & total_fda_flavored_mL <= 30 & total_packs == 0, 1, 0),
+  fda_flav_ecig_30to50  = fifelse(total_fda_flavored_mL > 30 & total_fda_flavored_mL <= 50 & total_packs == 0, 1, 0),
+  fda_flav_ecig_50plus  = fifelse(total_fda_flavored_mL > 50 & total_packs == 0, 1, 0),
+
+  # Bundles differentiated by cig quantity (lo/hi at 20 packs), ecig quantity pooled
+  bundle_orig_lo          = fifelse(total_packs > 0 & total_packs <= 20 & total_original_mL > 0, 1, 0),
+  bundle_orig_hi          = fifelse(total_packs > 20 & total_original_mL > 0, 1, 0),
+  bundle_non_fda_flav_lo  = fifelse(total_packs > 0 & total_packs <= 20 & total_non_fda_flavored_mL > 0, 1, 0),
+  bundle_non_fda_flav_hi  = fifelse(total_packs > 20 & total_non_fda_flavored_mL > 0, 1, 0),
+  bundle_fda_flav_lo      = fifelse(total_packs > 0 & total_packs <= 20 & total_fda_flavored_mL > 0, 1, 0),
+  bundle_fda_flav_hi      = fifelse(total_packs > 20 & total_fda_flavored_mL > 0, 1, 0)
 )]
 
 # # Summary statistics for bundle purchasers
@@ -212,83 +215,66 @@ if (file.exists(file_name))
 # Consumption
 #############################
 
-# # OLD: Median purchased quantity within bins (12 cig bins, 2 bundle alternatives)
-# dt_consumption <- dt[, .(
-#
-#   # Cigarette alternatives (cigs only: total_mL == 0)
-#   cig_1      = 1,
-#   cig_2      = 2,
-#   cig_3to4   = median(total_packs[total_packs >= 3  & total_packs <= 4  & total_mL == 0], na.rm = TRUE),
-#   cig_5to9   = median(total_packs[total_packs >= 5  & total_packs <= 9  & total_mL == 0], na.rm = TRUE),
-#   cig_10     = 10,
-#   cig_11to19 = median(total_packs[total_packs >= 11 & total_packs <= 19 & total_mL == 0], na.rm = TRUE),
-#   cig_20     = 20,
-#   cig_21to29 = median(total_packs[total_packs >= 21 & total_packs <= 29 & total_mL == 0], na.rm = TRUE),
-#   cig_30     = 30,
-#   cig_31to39 = median(total_packs[total_packs >= 31 & total_packs <= 39 & total_mL == 0], na.rm = TRUE),
-#   cig_40     = 40,
-#   cig_41plus = median(total_packs[total_packs >= 41 & total_mL == 0], na.rm = TRUE),
-#
-#   # Original e-cig alternatives (e-cig only: total_packs == 0)
-#   orig_ecig_1to10  = median(total_original_mL[total_original_mL > 0  & total_original_mL <= 10 & total_packs == 0], na.rm = TRUE),
-#   orig_ecig_10to30 = median(total_original_mL[total_original_mL > 10 & total_original_mL <= 30 & total_packs == 0], na.rm = TRUE),
-#   orig_ecig_30plus = median(total_original_mL[total_original_mL > 30 & total_packs == 0], na.rm = TRUE),
-#
-#   # Flavored e-cig alternatives (e-cig only: total_packs == 0)
-#   flav_ecig_0to10  = median(total_flavored_mL[total_flavored_mL > 0  & total_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
-#   flav_ecig_10to30 = median(total_flavored_mL[total_flavored_mL > 10 & total_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
-#   flav_ecig_30plus = median(total_flavored_mL[total_flavored_mL > 30 & total_packs == 0], na.rm = TRUE),
-#
-#   # Bundle medians: median packs conditional on also buying e-cig; median mL conditional on also buying cigs
-#   bundle_orig_cig = median(total_packs[total_packs > 0 & total_original_mL > 0], na.rm = TRUE),
-#   bundle_orig_ecig  = median(total_original_mL[total_packs > 0 & total_original_mL > 0], na.rm = TRUE),
-#   bundle_flav_cig = median(total_packs[total_packs > 0 & total_flavored_mL > 0], na.rm = TRUE),
-#   bundle_flav_ecig  = median(total_flavored_mL[total_packs > 0 & total_flavored_mL > 0], na.rm = TRUE)
-# )]
-
-# NEW: Median purchased quantity within bins (6 cig bins, 8 bundle alternatives)
-# Matches the product choices defined above
+# Define consumption values for each alternative 
 dt_consumption <- dt[, .(
 
   # Cigarette alternatives (cigs only: total_mL == 0)
-  cig_1to2   = median(total_packs[(total_packs == 1 | total_packs == 2) & total_mL == 0], na.rm = TRUE),
-  cig_3to10  = median(total_packs[total_packs >= 3  & total_packs <= 10 & total_mL == 0], na.rm = TRUE),
-  cig_11to20 = median(total_packs[total_packs >= 11 & total_packs <= 20 & total_mL == 0], na.rm = TRUE),
-  cig_21to30 = median(total_packs[total_packs >= 21 & total_packs <= 30 & total_mL == 0], na.rm = TRUE),
-  cig_31to40 = median(total_packs[total_packs >= 31 & total_packs <= 40 & total_mL == 0], na.rm = TRUE),
+  cig_1      = 1,
+  cig_2      = 2,
+  cig_3to4   = median(total_packs[total_packs >= 3  & total_packs <= 4  & total_mL == 0], na.rm = TRUE),
+  cig_5to9   = median(total_packs[total_packs >= 5  & total_packs <= 9  & total_mL == 0], na.rm = TRUE),
+  cig_10     = 10,
+  cig_11to19 = median(total_packs[total_packs >= 11 & total_packs <= 19 & total_mL == 0], na.rm = TRUE),
+  cig_20     = 20,
+  cig_21to29 = median(total_packs[total_packs >= 21 & total_packs <= 29 & total_mL == 0], na.rm = TRUE),
+  cig_30     = 30,
+  cig_31to39 = median(total_packs[total_packs >= 31 & total_packs <= 39 & total_mL == 0], na.rm = TRUE),
+  cig_40     = 40,
   cig_41plus = median(total_packs[total_packs >= 41 & total_mL == 0], na.rm = TRUE),
 
   # Original e-cig alternatives (e-cig only: total_packs == 0)
-  orig_ecig_1to10  = median(total_original_mL[total_original_mL > 0  & total_original_mL <= 10 & total_packs == 0], na.rm = TRUE),
-  orig_ecig_10to30 = median(total_original_mL[total_original_mL > 10 & total_original_mL <= 30 & total_packs == 0], na.rm = TRUE),
-  orig_ecig_30plus = median(total_original_mL[total_original_mL > 30 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_0to5   = median(total_original_mL[total_original_mL > 0  & total_original_mL <= 5  & total_packs == 0], na.rm = TRUE),
+  orig_ecig_5to10  = median(total_original_mL[total_original_mL > 5  & total_original_mL <= 10 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_10to15 = median(total_original_mL[total_original_mL > 10 & total_original_mL <= 15 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_15to20 = median(total_original_mL[total_original_mL > 15 & total_original_mL <= 20 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_20to30 = median(total_original_mL[total_original_mL > 20 & total_original_mL <= 30 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_30to50 = median(total_original_mL[total_original_mL > 30 & total_original_mL <= 50 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_50plus = median(total_original_mL[total_original_mL > 50 & total_packs == 0], na.rm = TRUE),
 
-  # Flavored e-cig alternatives (e-cig only: total_packs == 0)
-  flav_ecig_0to10  = median(total_flavored_mL[total_flavored_mL > 0  & total_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
-  flav_ecig_10to30 = median(total_flavored_mL[total_flavored_mL > 10 & total_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
-  flav_ecig_30plus = median(total_flavored_mL[total_flavored_mL > 30 & total_packs == 0], na.rm = TRUE),
+  # Non-FDA flavored e-cig alternatives (e-cig only: total_packs == 0)
+  non_fda_flav_ecig_0to5   = median(total_non_fda_flavored_mL[total_non_fda_flavored_mL > 0  & total_non_fda_flavored_mL <= 5  & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_5to10  = median(total_non_fda_flavored_mL[total_non_fda_flavored_mL > 5  & total_non_fda_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_10to15 = median(total_non_fda_flavored_mL[total_non_fda_flavored_mL > 10 & total_non_fda_flavored_mL <= 15 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_15to20 = median(total_non_fda_flavored_mL[total_non_fda_flavored_mL > 15 & total_non_fda_flavored_mL <= 20 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_20to30 = median(total_non_fda_flavored_mL[total_non_fda_flavored_mL > 20 & total_non_fda_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_30to50 = median(total_non_fda_flavored_mL[total_non_fda_flavored_mL > 30 & total_non_fda_flavored_mL <= 50 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_50plus = median(total_non_fda_flavored_mL[total_non_fda_flavored_mL > 50 & total_packs == 0], na.rm = TRUE),
 
-  # Bundle alternatives: 8 bundles differentiated by quantity (lo/hi for cigs and ecig)
-  # Original e-cig bundles - cigarette consumption
-  bundle_orig_lo_lo_cig = median(total_packs[total_packs > 0 & total_packs <= 20 & total_original_mL > 0 & total_original_mL <= 15], na.rm = TRUE),
-  bundle_orig_lo_hi_cig = median(total_packs[total_packs > 0 & total_packs <= 20 & total_original_mL > 15], na.rm = TRUE),
-  bundle_orig_hi_lo_cig = median(total_packs[total_packs > 20 & total_original_mL > 0 & total_original_mL <= 15], na.rm = TRUE),
-  bundle_orig_hi_hi_cig = median(total_packs[total_packs > 20 & total_original_mL > 15], na.rm = TRUE),
-  # Original e-cig bundles - e-cig consumption
-  bundle_orig_lo_lo_ecig = median(total_original_mL[total_packs > 0 & total_packs <= 20 & total_original_mL > 0 & total_original_mL <= 15], na.rm = TRUE),
-  bundle_orig_lo_hi_ecig = median(total_original_mL[total_packs > 0 & total_packs <= 20 & total_original_mL > 15], na.rm = TRUE),
-  bundle_orig_hi_lo_ecig = median(total_original_mL[total_packs > 20 & total_original_mL > 0 & total_original_mL <= 15], na.rm = TRUE),
-  bundle_orig_hi_hi_ecig = median(total_original_mL[total_packs > 20 & total_original_mL > 15], na.rm = TRUE),
-  # Flavored e-cig bundles - cigarette consumption
-  bundle_flav_lo_lo_cig = median(total_packs[total_packs > 0 & total_packs <= 20 & total_flavored_mL > 0 & total_flavored_mL <= 15], na.rm = TRUE),
-  bundle_flav_lo_hi_cig = median(total_packs[total_packs > 0 & total_packs <= 20 & total_flavored_mL > 15], na.rm = TRUE),
-  bundle_flav_hi_lo_cig = median(total_packs[total_packs > 20 & total_flavored_mL > 0 & total_flavored_mL <= 15], na.rm = TRUE),
-  bundle_flav_hi_hi_cig = median(total_packs[total_packs > 20 & total_flavored_mL > 15], na.rm = TRUE),
-  # Flavored e-cig bundles - e-cig consumption
-  bundle_flav_lo_lo_ecig = median(total_flavored_mL[total_packs > 0 & total_packs <= 20 & total_flavored_mL > 0 & total_flavored_mL <= 15], na.rm = TRUE),
-  bundle_flav_lo_hi_ecig = median(total_flavored_mL[total_packs > 0 & total_packs <= 20 & total_flavored_mL > 15], na.rm = TRUE),
-  bundle_flav_hi_lo_ecig = median(total_flavored_mL[total_packs > 20 & total_flavored_mL > 0 & total_flavored_mL <= 15], na.rm = TRUE),
-  bundle_flav_hi_hi_ecig = median(total_flavored_mL[total_packs > 20 & total_flavored_mL > 15], na.rm = TRUE)
+  # FDA-authorized flavored e-cig alternatives (e-cig only: total_packs == 0)
+  fda_flav_ecig_0to5   = median(total_fda_flavored_mL[total_fda_flavored_mL > 0  & total_fda_flavored_mL <= 5  & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_5to10  = median(total_fda_flavored_mL[total_fda_flavored_mL > 5  & total_fda_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_10to15 = median(total_fda_flavored_mL[total_fda_flavored_mL > 10 & total_fda_flavored_mL <= 15 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_15to20 = median(total_fda_flavored_mL[total_fda_flavored_mL > 15 & total_fda_flavored_mL <= 20 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_20to30 = median(total_fda_flavored_mL[total_fda_flavored_mL > 20 & total_fda_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_30to50 = median(total_fda_flavored_mL[total_fda_flavored_mL > 30 & total_fda_flavored_mL <= 50 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_50plus = median(total_fda_flavored_mL[total_fda_flavored_mL > 50 & total_packs == 0], na.rm = TRUE),
+
+  # Bundle alternatives: 6 bundles differentiated by cig quantity (lo/hi at 20 packs), ecig pooled
+  # Original e-cig bundles
+  bundle_orig_lo_cig  = median(total_packs[total_packs > 0 & total_packs <= 20 & total_original_mL > 0], na.rm = TRUE),
+  bundle_orig_hi_cig  = median(total_packs[total_packs > 20 & total_original_mL > 0], na.rm = TRUE),
+  bundle_orig_lo_ecig = median(total_original_mL[total_packs > 0 & total_packs <= 20 & total_original_mL > 0], na.rm = TRUE),
+  bundle_orig_hi_ecig = median(total_original_mL[total_packs > 20 & total_original_mL > 0], na.rm = TRUE),
+  # Non-FDA flavored e-cig bundles
+  bundle_non_fda_flav_lo_cig  = median(total_packs[total_packs > 0 & total_packs <= 20 & total_non_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_non_fda_flav_hi_cig  = median(total_packs[total_packs > 20 & total_non_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_non_fda_flav_lo_ecig = median(total_non_fda_flavored_mL[total_packs > 0 & total_packs <= 20 & total_non_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_non_fda_flav_hi_ecig = median(total_non_fda_flavored_mL[total_packs > 20 & total_non_fda_flavored_mL > 0], na.rm = TRUE),
+  # FDA-authorized flavored e-cig bundles
+  bundle_fda_flav_lo_cig  = median(total_packs[total_packs > 0 & total_packs <= 20 & total_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_fda_flav_hi_cig  = median(total_packs[total_packs > 20 & total_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_fda_flav_lo_ecig = median(total_fda_flavored_mL[total_packs > 0 & total_packs <= 20 & total_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_fda_flav_hi_ecig = median(total_fda_flavored_mL[total_packs > 20 & total_fda_flavored_mL > 0], na.rm = TRUE)
 )]
 
 # Convert to long format
@@ -318,83 +304,66 @@ if (file.exists(file_name))
 # Nicotine
 #############################
 
-# # OLD: Median nicotine absorbed within bins (12 cig bins, 2 bundle alternatives)
-# dt_nicotine <- dt[, .(
-#
-#   # Cigarette alternatives (cigs only: total_mL == 0)
-#   cig_1      = median(cig_nicotine_mg_absorbed[total_packs == 1  & total_mL == 0], na.rm = TRUE),
-#   cig_2      = median(cig_nicotine_mg_absorbed[total_packs == 2  & total_mL == 0], na.rm = TRUE),
-#   cig_3to4   = median(cig_nicotine_mg_absorbed[total_packs >= 3  & total_packs <= 4  & total_mL == 0], na.rm = TRUE),
-#   cig_5to9   = median(cig_nicotine_mg_absorbed[total_packs >= 5  & total_packs <= 9  & total_mL == 0], na.rm = TRUE),
-#   cig_10     = median(cig_nicotine_mg_absorbed[total_packs == 10 & total_mL == 0], na.rm = TRUE),
-#   cig_11to19 = median(cig_nicotine_mg_absorbed[total_packs >= 11 & total_packs <= 19 & total_mL == 0], na.rm = TRUE),
-#   cig_20     = median(cig_nicotine_mg_absorbed[total_packs == 20 & total_mL == 0], na.rm = TRUE),
-#   cig_21to29 = median(cig_nicotine_mg_absorbed[total_packs >= 21 & total_packs <= 29 & total_mL == 0], na.rm = TRUE),
-#   cig_30     = median(cig_nicotine_mg_absorbed[total_packs == 30 & total_mL == 0], na.rm = TRUE),
-#   cig_31to39 = median(cig_nicotine_mg_absorbed[total_packs >= 31 & total_packs <= 39 & total_mL == 0], na.rm = TRUE),
-#   cig_40     = median(cig_nicotine_mg_absorbed[total_packs == 40 & total_mL == 0], na.rm = TRUE),
-#   cig_41plus = median(cig_nicotine_mg_absorbed[total_packs >= 41 & total_mL == 0], na.rm = TRUE),
-#
-#   # Original e-cig alternatives (e-cig only: total_packs == 0)
-#   orig_ecig_1to10  = median(ecig_nicotine_mg_absorbed[total_original_mL > 0  & total_original_mL <= 10 & total_packs == 0], na.rm = TRUE),
-#   orig_ecig_10to30 = median(ecig_nicotine_mg_absorbed[total_original_mL > 10 & total_original_mL <= 30 & total_packs == 0], na.rm = TRUE),
-#   orig_ecig_30plus = median(ecig_nicotine_mg_absorbed[total_original_mL > 30 & total_packs == 0], na.rm = TRUE),
-#
-#   # Flavored e-cig alternatives (e-cig only: total_packs == 0)
-#   flav_ecig_0to10  = median(ecig_nicotine_mg_absorbed[total_flavored_mL > 0  & total_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
-#   flav_ecig_10to30 = median(ecig_nicotine_mg_absorbed[total_flavored_mL > 10 & total_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
-#   flav_ecig_30plus = median(ecig_nicotine_mg_absorbed[total_flavored_mL > 30 & total_packs == 0], na.rm = TRUE),
-#
-#   # Bundle medians: nicotine absorbed from each product conditional on joint purchase
-#   bundle_orig_cig = median(cig_nicotine_mg_absorbed[total_packs > 0  & total_original_mL > 0], na.rm = TRUE),
-#   bundle_orig_ecig  = median(ecig_nicotine_mg_absorbed[total_packs > 0 & total_original_mL > 0], na.rm = TRUE),
-#   bundle_flav_cig = median(cig_nicotine_mg_absorbed[total_packs > 0  & total_flavored_mL > 0], na.rm = TRUE),
-#   bundle_flav_ecig  = median(ecig_nicotine_mg_absorbed[total_packs > 0 & total_flavored_mL > 0], na.rm = TRUE)
-# )]
-
-# NEW: Median nicotine absorbed within bins (6 cig bins, 8 bundle alternatives)
-# Matches the product choices defined above
+# Define nicotine values for each alternative 
 dt_nicotine <- dt[, .(
 
   # Cigarette alternatives (cigs only: total_mL == 0)
-  cig_1to2   = median(cig_nicotine_mg_absorbed[(total_packs == 1 | total_packs == 2) & total_mL == 0], na.rm = TRUE),
-  cig_3to10  = median(cig_nicotine_mg_absorbed[total_packs >= 3  & total_packs <= 10 & total_mL == 0], na.rm = TRUE),
-  cig_11to20 = median(cig_nicotine_mg_absorbed[total_packs >= 11 & total_packs <= 20 & total_mL == 0], na.rm = TRUE),
-  cig_21to30 = median(cig_nicotine_mg_absorbed[total_packs >= 21 & total_packs <= 30 & total_mL == 0], na.rm = TRUE),
-  cig_31to40 = median(cig_nicotine_mg_absorbed[total_packs >= 31 & total_packs <= 40 & total_mL == 0], na.rm = TRUE),
+  cig_1      = median(cig_nicotine_mg_absorbed[total_packs == 1  & total_mL == 0], na.rm = TRUE),
+  cig_2      = median(cig_nicotine_mg_absorbed[total_packs == 2  & total_mL == 0], na.rm = TRUE),
+  cig_3to4   = median(cig_nicotine_mg_absorbed[total_packs >= 3  & total_packs <= 4  & total_mL == 0], na.rm = TRUE),
+  cig_5to9   = median(cig_nicotine_mg_absorbed[total_packs >= 5  & total_packs <= 9  & total_mL == 0], na.rm = TRUE),
+  cig_10     = median(cig_nicotine_mg_absorbed[total_packs == 10 & total_mL == 0], na.rm = TRUE),
+  cig_11to19 = median(cig_nicotine_mg_absorbed[total_packs >= 11 & total_packs <= 19 & total_mL == 0], na.rm = TRUE),
+  cig_20     = median(cig_nicotine_mg_absorbed[total_packs == 20 & total_mL == 0], na.rm = TRUE),
+  cig_21to29 = median(cig_nicotine_mg_absorbed[total_packs >= 21 & total_packs <= 29 & total_mL == 0], na.rm = TRUE),
+  cig_30     = median(cig_nicotine_mg_absorbed[total_packs == 30 & total_mL == 0], na.rm = TRUE),
+  cig_31to39 = median(cig_nicotine_mg_absorbed[total_packs >= 31 & total_packs <= 39 & total_mL == 0], na.rm = TRUE),
+  cig_40     = median(cig_nicotine_mg_absorbed[total_packs == 40 & total_mL == 0], na.rm = TRUE),
   cig_41plus = median(cig_nicotine_mg_absorbed[total_packs >= 41 & total_mL == 0], na.rm = TRUE),
 
   # Original e-cig alternatives (e-cig only: total_packs == 0)
-  orig_ecig_1to10  = median(ecig_nicotine_mg_absorbed[total_original_mL > 0  & total_original_mL <= 10 & total_packs == 0], na.rm = TRUE),
-  orig_ecig_10to30 = median(ecig_nicotine_mg_absorbed[total_original_mL > 10 & total_original_mL <= 30 & total_packs == 0], na.rm = TRUE),
-  orig_ecig_30plus = median(ecig_nicotine_mg_absorbed[total_original_mL > 30 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_0to5   = median(ecig_nicotine_mg_absorbed[total_original_mL > 0  & total_original_mL <= 5  & total_packs == 0], na.rm = TRUE),
+  orig_ecig_5to10  = median(ecig_nicotine_mg_absorbed[total_original_mL > 5  & total_original_mL <= 10 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_10to15 = median(ecig_nicotine_mg_absorbed[total_original_mL > 10 & total_original_mL <= 15 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_15to20 = median(ecig_nicotine_mg_absorbed[total_original_mL > 15 & total_original_mL <= 20 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_20to30 = median(ecig_nicotine_mg_absorbed[total_original_mL > 20 & total_original_mL <= 30 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_30to50 = median(ecig_nicotine_mg_absorbed[total_original_mL > 30 & total_original_mL <= 50 & total_packs == 0], na.rm = TRUE),
+  orig_ecig_50plus = median(ecig_nicotine_mg_absorbed[total_original_mL > 50 & total_packs == 0], na.rm = TRUE),
 
-  # Flavored e-cig alternatives (e-cig only: total_packs == 0)
-  flav_ecig_0to10  = median(ecig_nicotine_mg_absorbed[total_flavored_mL > 0  & total_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
-  flav_ecig_10to30 = median(ecig_nicotine_mg_absorbed[total_flavored_mL > 10 & total_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
-  flav_ecig_30plus = median(ecig_nicotine_mg_absorbed[total_flavored_mL > 30 & total_packs == 0], na.rm = TRUE),
+  # Non-FDA flavored e-cig alternatives (e-cig only: total_packs == 0)
+  non_fda_flav_ecig_0to5   = median(ecig_nicotine_mg_absorbed[total_non_fda_flavored_mL > 0  & total_non_fda_flavored_mL <= 5  & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_5to10  = median(ecig_nicotine_mg_absorbed[total_non_fda_flavored_mL > 5  & total_non_fda_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_10to15 = median(ecig_nicotine_mg_absorbed[total_non_fda_flavored_mL > 10 & total_non_fda_flavored_mL <= 15 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_15to20 = median(ecig_nicotine_mg_absorbed[total_non_fda_flavored_mL > 15 & total_non_fda_flavored_mL <= 20 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_20to30 = median(ecig_nicotine_mg_absorbed[total_non_fda_flavored_mL > 20 & total_non_fda_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_30to50 = median(ecig_nicotine_mg_absorbed[total_non_fda_flavored_mL > 30 & total_non_fda_flavored_mL <= 50 & total_packs == 0], na.rm = TRUE),
+  non_fda_flav_ecig_50plus = median(ecig_nicotine_mg_absorbed[total_non_fda_flavored_mL > 50 & total_packs == 0], na.rm = TRUE),
 
-  # Bundle alternatives: 8 bundles differentiated by quantity (lo/hi for cigs and ecig)
-  # Original e-cig bundles - cigarette nicotine
-  bundle_orig_lo_lo_cig_nic = median(cig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_original_mL > 0 & total_original_mL <= 15], na.rm = TRUE),
-  bundle_orig_lo_hi_cig_nic = median(cig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_original_mL > 15], na.rm = TRUE),
-  bundle_orig_hi_lo_cig_nic = median(cig_nicotine_mg_absorbed[total_packs > 20 & total_original_mL > 0 & total_original_mL <= 15], na.rm = TRUE),
-  bundle_orig_hi_hi_cig_nic = median(cig_nicotine_mg_absorbed[total_packs > 20 & total_original_mL > 15], na.rm = TRUE),
-  # Original e-cig bundles - e-cig nicotine
-  bundle_orig_lo_lo_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_original_mL > 0 & total_original_mL <= 15], na.rm = TRUE),
-  bundle_orig_lo_hi_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_original_mL > 15], na.rm = TRUE),
-  bundle_orig_hi_lo_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 20 & total_original_mL > 0 & total_original_mL <= 15], na.rm = TRUE),
-  bundle_orig_hi_hi_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 20 & total_original_mL > 15], na.rm = TRUE),
-  # Flavored e-cig bundles - cigarette nicotine
-  bundle_flav_lo_lo_cig_nic = median(cig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_flavored_mL > 0 & total_flavored_mL <= 15], na.rm = TRUE),
-  bundle_flav_lo_hi_cig_nic = median(cig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_flavored_mL > 15], na.rm = TRUE),
-  bundle_flav_hi_lo_cig_nic = median(cig_nicotine_mg_absorbed[total_packs > 20 & total_flavored_mL > 0 & total_flavored_mL <= 15], na.rm = TRUE),
-  bundle_flav_hi_hi_cig_nic = median(cig_nicotine_mg_absorbed[total_packs > 20 & total_flavored_mL > 15], na.rm = TRUE),
-  # Flavored e-cig bundles - e-cig nicotine
-  bundle_flav_lo_lo_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_flavored_mL > 0 & total_flavored_mL <= 15], na.rm = TRUE),
-  bundle_flav_lo_hi_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_flavored_mL > 15], na.rm = TRUE),
-  bundle_flav_hi_lo_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 20 & total_flavored_mL > 0 & total_flavored_mL <= 15], na.rm = TRUE),
-  bundle_flav_hi_hi_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 20 & total_flavored_mL > 15], na.rm = TRUE)
+  # FDA-authorized flavored e-cig alternatives (e-cig only: total_packs == 0)
+  fda_flav_ecig_0to5   = median(ecig_nicotine_mg_absorbed[total_fda_flavored_mL > 0  & total_fda_flavored_mL <= 5  & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_5to10  = median(ecig_nicotine_mg_absorbed[total_fda_flavored_mL > 5  & total_fda_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_10to15 = median(ecig_nicotine_mg_absorbed[total_fda_flavored_mL > 10 & total_fda_flavored_mL <= 15 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_15to20 = median(ecig_nicotine_mg_absorbed[total_fda_flavored_mL > 15 & total_fda_flavored_mL <= 20 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_20to30 = median(ecig_nicotine_mg_absorbed[total_fda_flavored_mL > 20 & total_fda_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_30to50 = median(ecig_nicotine_mg_absorbed[total_fda_flavored_mL > 30 & total_fda_flavored_mL <= 50 & total_packs == 0], na.rm = TRUE),
+  fda_flav_ecig_50plus = median(ecig_nicotine_mg_absorbed[total_fda_flavored_mL > 50 & total_packs == 0], na.rm = TRUE),
+
+  # Bundle alternatives: 6 bundles differentiated by cig quantity (lo/hi at 20 packs), ecig pooled
+  # Original e-cig bundles
+  bundle_orig_lo_cig_nic  = median(cig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_original_mL > 0], na.rm = TRUE),
+  bundle_orig_hi_cig_nic  = median(cig_nicotine_mg_absorbed[total_packs > 20 & total_original_mL > 0], na.rm = TRUE),
+  bundle_orig_lo_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_original_mL > 0], na.rm = TRUE),
+  bundle_orig_hi_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 20 & total_original_mL > 0], na.rm = TRUE),
+  # Non-FDA flavored e-cig bundles
+  bundle_non_fda_flav_lo_cig_nic  = median(cig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_non_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_non_fda_flav_hi_cig_nic  = median(cig_nicotine_mg_absorbed[total_packs > 20 & total_non_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_non_fda_flav_lo_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_non_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_non_fda_flav_hi_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 20 & total_non_fda_flavored_mL > 0], na.rm = TRUE),
+  # FDA-authorized flavored e-cig bundles
+  bundle_fda_flav_lo_cig_nic  = median(cig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_fda_flav_hi_cig_nic  = median(cig_nicotine_mg_absorbed[total_packs > 20 & total_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_fda_flav_lo_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 0 & total_packs <= 20 & total_fda_flavored_mL > 0], na.rm = TRUE),
+  bundle_fda_flav_hi_ecig_nic = median(ecig_nicotine_mg_absorbed[total_packs > 20 & total_fda_flavored_mL > 0], na.rm = TRUE)
 )]
 
 # Convert to long format
@@ -457,140 +426,69 @@ if (file.exists(file_name))
 # Prices
 #############################
 
-# # OLD: State-month median prices by bin (12 cig bins, 2 bundle alternatives)
-# dt_state_month_prices <- dt[, .(
-#
-#   # Cigarette price bins (cigs only: total_mL == 0)
-#   cig_1_sm      = median(real_per_pack_price_paid[total_packs == 1  & total_mL == 0], na.rm = TRUE),
-#   cig_2_sm      = median(real_per_pack_price_paid[total_packs == 2  & total_mL == 0], na.rm = TRUE),
-#   cig_3to4_sm   = median(real_per_pack_price_paid[total_packs >= 3  & total_packs <= 4  & total_mL == 0], na.rm = TRUE),
-#   cig_5to9_sm   = median(real_per_pack_price_paid[total_packs >= 5  & total_packs <= 9  & total_mL == 0], na.rm = TRUE),
-#   cig_10_sm     = median(real_per_pack_price_paid[total_packs == 10 & total_mL == 0], na.rm = TRUE),
-#   cig_11to19_sm = median(real_per_pack_price_paid[total_packs >= 11 & total_packs <= 19 & total_mL == 0], na.rm = TRUE),
-#   cig_20_sm     = median(real_per_pack_price_paid[total_packs == 20 & total_mL == 0], na.rm = TRUE),
-#   cig_21to29_sm = median(real_per_pack_price_paid[total_packs >= 21 & total_packs <= 29 & total_mL == 0], na.rm = TRUE),
-#   cig_30_sm     = median(real_per_pack_price_paid[total_packs == 30 & total_mL == 0], na.rm = TRUE),
-#   cig_31to39_sm = median(real_per_pack_price_paid[total_packs >= 31 & total_packs <= 39 & total_mL == 0], na.rm = TRUE),
-#   cig_40_sm     = median(real_per_pack_price_paid[total_packs == 40 & total_mL == 0], na.rm = TRUE),
-#   cig_41plus_sm = median(real_per_pack_price_paid[total_packs >= 41 & total_mL == 0], na.rm = TRUE),
-#
-#   # Original e-cigarette price bins (e-cig only: total_packs == 0)
-#   orig_ecig_1to10_sm  = median(real_per_mL_price_paid[total_original_mL > 0  & total_original_mL <= 10 & total_packs == 0], na.rm = TRUE),
-#   orig_ecig_10to30_sm = median(real_per_mL_price_paid[total_original_mL > 10 & total_original_mL <= 30 & total_packs == 0], na.rm = TRUE),
-#   orig_ecig_30plus_sm = median(real_per_mL_price_paid[total_original_mL > 30 & total_packs == 0], na.rm = TRUE),
-#
-#   # Flavored e-cigarette price bins (e-cig only: total_packs == 0)
-#   flav_ecig_0to10_sm  = median(real_per_mL_price_paid[total_flavored_mL > 0  & total_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
-#   flav_ecig_10to30_sm = median(real_per_mL_price_paid[total_flavored_mL > 10 & total_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
-#   flav_ecig_30plus_sm = median(real_per_mL_price_paid[total_flavored_mL > 30 & total_packs == 0], na.rm = TRUE),
-#
-#   # Bundle medians
-#   bundle_orig_cig_price_sm  = median(real_per_pack_price_paid[total_packs > 0 & total_original_mL > 0], na.rm = TRUE),
-#   bundle_orig_ecig_price_sm = median(real_per_mL_price_paid[total_packs > 0 & total_original_mL > 0], na.rm = TRUE),
-#   bundle_flav_cig_price_sm  = median(real_per_pack_price_paid[total_packs > 0 & total_flavored_mL > 0], na.rm = TRUE),
-#   bundle_flav_ecig_price_sm = median(real_per_mL_price_paid[total_packs > 0 & total_flavored_mL > 0], na.rm = TRUE)
-#
-# ), by = .(fips_state_code, purchase_month)]
-
 # State-month median per-unit prices BY BIN
 # These capture quantity discounts: larger quantity bins may have lower per-unit prices
 # Used for ALL observations regardless of what they chose (no conditioning on outcome)
 dt_state_month_prices <- dt[, .(
 
-  # Cigarette price bins (per-pack price for each quantity bin)
-  cig_1to2_sm   = median(real_per_pack_price_paid[total_packs >= 1  & total_packs <= 2], na.rm = TRUE),
-  cig_3to10_sm  = median(real_per_pack_price_paid[total_packs >= 3  & total_packs <= 10], na.rm = TRUE),
-  cig_11to20_sm = median(real_per_pack_price_paid[total_packs >= 11 & total_packs <= 20], na.rm = TRUE),
-  cig_21to30_sm = median(real_per_pack_price_paid[total_packs >= 21 & total_packs <= 30], na.rm = TRUE),
-  cig_31to40_sm = median(real_per_pack_price_paid[total_packs >= 31 & total_packs <= 40], na.rm = TRUE),
-  cig_41plus_sm = median(real_per_pack_price_paid[total_packs >= 41], na.rm = TRUE),
+  # Cigarette price bins (cigs only: total_mL == 0)
+  cig_1_sm      = median(real_per_pack_price_paid[total_packs == 1  & total_mL == 0], na.rm = TRUE),
+  cig_2_sm      = median(real_per_pack_price_paid[total_packs == 2  & total_mL == 0], na.rm = TRUE),
+  cig_3to4_sm   = median(real_per_pack_price_paid[total_packs >= 3  & total_packs <= 4  & total_mL == 0], na.rm = TRUE),
+  cig_5to9_sm   = median(real_per_pack_price_paid[total_packs >= 5  & total_packs <= 9  & total_mL == 0], na.rm = TRUE),
+  cig_10_sm     = median(real_per_pack_price_paid[total_packs == 10 & total_mL == 0], na.rm = TRUE),
+  cig_11to19_sm = median(real_per_pack_price_paid[total_packs >= 11 & total_packs <= 19 & total_mL == 0], na.rm = TRUE),
+  cig_20_sm     = median(real_per_pack_price_paid[total_packs == 20 & total_mL == 0], na.rm = TRUE),
+  cig_21to29_sm = median(real_per_pack_price_paid[total_packs >= 21 & total_packs <= 29 & total_mL == 0], na.rm = TRUE),
+  cig_30_sm     = median(real_per_pack_price_paid[total_packs == 30 & total_mL == 0], na.rm = TRUE),
+  cig_31to39_sm = median(real_per_pack_price_paid[total_packs >= 31 & total_packs <= 39 & total_mL == 0], na.rm = TRUE),
+  cig_40_sm     = median(real_per_pack_price_paid[total_packs == 40 & total_mL == 0], na.rm = TRUE),
+  cig_41plus_sm = median(real_per_pack_price_paid[total_packs >= 41 & total_mL == 0], na.rm = TRUE),
 
-  # Original e-cigarette price bins (per-mL price for each quantity bin)
-  orig_ecig_1to10_sm  = median(real_per_mL_price_paid[total_original_mL > 0  & total_original_mL <= 10], na.rm = TRUE),
-  orig_ecig_10to30_sm = median(real_per_mL_price_paid[total_original_mL > 10 & total_original_mL <= 30], na.rm = TRUE),
-  orig_ecig_30plus_sm = median(real_per_mL_price_paid[total_original_mL > 30], na.rm = TRUE),
-
-  # Flavored e-cigarette price bins (per-mL price for each quantity bin)
-  flav_ecig_0to10_sm  = median(real_per_mL_price_paid[total_flavored_mL > 0  & total_flavored_mL <= 10], na.rm = TRUE),
-  flav_ecig_10to30_sm = median(real_per_mL_price_paid[total_flavored_mL > 10 & total_flavored_mL <= 30], na.rm = TRUE),
-  flav_ecig_30plus_sm = median(real_per_mL_price_paid[total_flavored_mL > 30], na.rm = TRUE),
-
-  # Bundle prices (for households who bought both cigs and e-cigs)
-  bundle_cig_sm  = median(real_per_pack_price_paid[total_packs > 0 & total_mL > 0], na.rm = TRUE),
-  bundle_orig_ecig_sm = median(real_per_mL_price_paid[total_packs > 0 & total_original_mL > 0], na.rm = TRUE),
-  bundle_flav_ecig_sm = median(real_per_mL_price_paid[total_packs > 0 & total_flavored_mL > 0], na.rm = TRUE)
+  # E-cigarette price bins (per-mL price by total mL, pooling orig and flav)
+  ecig_0to5_sm   = median(real_per_mL_price_paid[total_mL > 0  & total_mL <= 5],  na.rm = TRUE),
+  ecig_5to10_sm  = median(real_per_mL_price_paid[total_mL > 5  & total_mL <= 10], na.rm = TRUE),
+  ecig_10to15_sm = median(real_per_mL_price_paid[total_mL > 10 & total_mL <= 15], na.rm = TRUE),
+  ecig_15to20_sm = median(real_per_mL_price_paid[total_mL > 15 & total_mL <= 20], na.rm = TRUE),
+  ecig_20to30_sm = median(real_per_mL_price_paid[total_mL > 20 & total_mL <= 30], na.rm = TRUE),
+  ecig_30to50_sm = median(real_per_mL_price_paid[total_mL > 30 & total_mL <= 50], na.rm = TRUE),
+  ecig_50plus_sm = median(real_per_mL_price_paid[total_mL > 50], na.rm = TRUE)
 
 ), keyby = .(fips_state_code, purchase_month)]
-
-# # OLD: Monthly median prices by bin (12 cig bins, 2 bundle alternatives)
-# dt_month_prices <- dt[, .(
-#
-#   # Cigarette price bins (cigs only: total_mL == 0)
-#   cig_1_m      = median(real_per_pack_price_paid[total_packs == 1  & total_mL == 0], na.rm = TRUE),
-#   cig_2_m      = median(real_per_pack_price_paid[total_packs == 2  & total_mL == 0], na.rm = TRUE),
-#   cig_3to4_m   = median(real_per_pack_price_paid[total_packs >= 3  & total_packs <= 4  & total_mL == 0], na.rm = TRUE),
-#   cig_5to9_m   = median(real_per_pack_price_paid[total_packs >= 5  & total_packs <= 9  & total_mL == 0], na.rm = TRUE),
-#   cig_10_m     = median(real_per_pack_price_paid[total_packs == 10 & total_mL == 0], na.rm = TRUE),
-#   cig_11to19_m = median(real_per_pack_price_paid[total_packs >= 11 & total_packs <= 19 & total_mL == 0], na.rm = TRUE),
-#   cig_20_m     = median(real_per_pack_price_paid[total_packs == 20 & total_mL == 0], na.rm = TRUE),
-#   cig_21to29_m = median(real_per_pack_price_paid[total_packs >= 21 & total_packs <= 29 & total_mL == 0], na.rm = TRUE),
-#   cig_30_m     = median(real_per_pack_price_paid[total_packs == 30 & total_mL == 0], na.rm = TRUE),
-#   cig_31to39_m = median(real_per_pack_price_paid[total_packs >= 31 & total_packs <= 39 & total_mL == 0], na.rm = TRUE),
-#   cig_40_m     = median(real_per_pack_price_paid[total_packs == 40 & total_mL == 0], na.rm = TRUE),
-#   cig_41plus_m = median(real_per_pack_price_paid[total_packs >= 41 & total_mL == 0], na.rm = TRUE),
-#
-#   # Original e-cigarette price bins (e-cig only: total_packs == 0)
-#   orig_ecig_1to10_m  = median(real_per_mL_price_paid[total_original_mL > 0  & total_original_mL <= 10 & total_packs == 0], na.rm = TRUE),
-#   orig_ecig_10to30_m = median(real_per_mL_price_paid[total_original_mL > 10 & total_original_mL <= 30 & total_packs == 0], na.rm = TRUE),
-#   orig_ecig_30plus_m = median(real_per_mL_price_paid[total_original_mL > 30 & total_packs == 0], na.rm = TRUE),
-#
-#   # Flavored e-cigarette price bins (e-cig only: total_packs == 0)
-#   flav_ecig_0to10_m  = median(real_per_mL_price_paid[total_flavored_mL > 0  & total_flavored_mL <= 10 & total_packs == 0], na.rm = TRUE),
-#   flav_ecig_10to30_m = median(real_per_mL_price_paid[total_flavored_mL > 10 & total_flavored_mL <= 30 & total_packs == 0], na.rm = TRUE),
-#   flav_ecig_30plus_m = median(real_per_mL_price_paid[total_flavored_mL > 30 & total_packs == 0], na.rm = TRUE),
-#
-#   # Bundle per-unit prices
-#   bundle_orig_cig_price_m  = median(real_per_pack_price_paid[total_packs > 0 & total_original_mL > 0], na.rm = TRUE),
-#   bundle_orig_ecig_price_m = median(real_per_mL_price_paid[total_packs > 0 & total_original_mL > 0], na.rm = TRUE),
-#   bundle_flav_cig_price_m  = median(real_per_pack_price_paid[total_packs > 0 & total_flavored_mL > 0], na.rm = TRUE),
-#   bundle_flav_ecig_price_m = median(real_per_mL_price_paid[total_packs > 0 & total_flavored_mL > 0], na.rm = TRUE)
-#
-# ), by = purchase_month]
 
 # Monthly median per-unit prices BY BIN (fallback when state-month median is unavailable)
 dt_month_prices <- dt[, .(
 
-  # Cigarette price bins
-  cig_1to2_m   = median(real_per_pack_price_paid[total_packs >= 1  & total_packs <= 2], na.rm = TRUE),
-  cig_3to10_m  = median(real_per_pack_price_paid[total_packs >= 3  & total_packs <= 10], na.rm = TRUE),
-  cig_11to20_m = median(real_per_pack_price_paid[total_packs >= 11 & total_packs <= 20], na.rm = TRUE),
-  cig_21to30_m = median(real_per_pack_price_paid[total_packs >= 21 & total_packs <= 30], na.rm = TRUE),
-  cig_31to40_m = median(real_per_pack_price_paid[total_packs >= 31 & total_packs <= 40], na.rm = TRUE),
-  cig_41plus_m = median(real_per_pack_price_paid[total_packs >= 41], na.rm = TRUE),
+  # Cigarette price bins (cigs only: total_mL == 0)
+  cig_1_m      = median(real_per_pack_price_paid[total_packs == 1  & total_mL == 0], na.rm = TRUE),
+  cig_2_m      = median(real_per_pack_price_paid[total_packs == 2  & total_mL == 0], na.rm = TRUE),
+  cig_3to4_m   = median(real_per_pack_price_paid[total_packs >= 3  & total_packs <= 4  & total_mL == 0], na.rm = TRUE),
+  cig_5to9_m   = median(real_per_pack_price_paid[total_packs >= 5  & total_packs <= 9  & total_mL == 0], na.rm = TRUE),
+  cig_10_m     = median(real_per_pack_price_paid[total_packs == 10 & total_mL == 0], na.rm = TRUE),
+  cig_11to19_m = median(real_per_pack_price_paid[total_packs >= 11 & total_packs <= 19 & total_mL == 0], na.rm = TRUE),
+  cig_20_m     = median(real_per_pack_price_paid[total_packs == 20 & total_mL == 0], na.rm = TRUE),
+  cig_21to29_m = median(real_per_pack_price_paid[total_packs >= 21 & total_packs <= 29 & total_mL == 0], na.rm = TRUE),
+  cig_30_m     = median(real_per_pack_price_paid[total_packs == 30 & total_mL == 0], na.rm = TRUE),
+  cig_31to39_m = median(real_per_pack_price_paid[total_packs >= 31 & total_packs <= 39 & total_mL == 0], na.rm = TRUE),
+  cig_40_m     = median(real_per_pack_price_paid[total_packs == 40 & total_mL == 0], na.rm = TRUE),
+  cig_41plus_m = median(real_per_pack_price_paid[total_packs >= 41 & total_mL == 0], na.rm = TRUE),
 
-  # Original e-cigarette price bins
-  orig_ecig_1to10_m  = median(real_per_mL_price_paid[total_original_mL > 0  & total_original_mL <= 10], na.rm = TRUE),
-  orig_ecig_10to30_m = median(real_per_mL_price_paid[total_original_mL > 10 & total_original_mL <= 30], na.rm = TRUE),
-  orig_ecig_30plus_m = median(real_per_mL_price_paid[total_original_mL > 30], na.rm = TRUE),
-
-  # Flavored e-cigarette price bins
-  flav_ecig_0to10_m  = median(real_per_mL_price_paid[total_flavored_mL > 0  & total_flavored_mL <= 10], na.rm = TRUE),
-  flav_ecig_10to30_m = median(real_per_mL_price_paid[total_flavored_mL > 10 & total_flavored_mL <= 30], na.rm = TRUE),
-  flav_ecig_30plus_m = median(real_per_mL_price_paid[total_flavored_mL > 30], na.rm = TRUE),
-
-  # Bundle prices
-  bundle_cig_m  = median(real_per_pack_price_paid[total_packs > 0 & total_mL > 0], na.rm = TRUE),
-  bundle_orig_ecig_m = median(real_per_mL_price_paid[total_packs > 0 & total_original_mL > 0], na.rm = TRUE),
-  bundle_flav_ecig_m = median(real_per_mL_price_paid[total_packs > 0 & total_flavored_mL > 0], na.rm = TRUE)
+  # E-cigarette price bins (per-mL price by total mL, pooling orig and flav)
+  ecig_0to5_m   = median(real_per_mL_price_paid[total_mL > 0  & total_mL <= 5],  na.rm = TRUE),
+  ecig_5to10_m  = median(real_per_mL_price_paid[total_mL > 5  & total_mL <= 10], na.rm = TRUE),
+  ecig_10to15_m = median(real_per_mL_price_paid[total_mL > 10 & total_mL <= 15], na.rm = TRUE),
+  ecig_15to20_m = median(real_per_mL_price_paid[total_mL > 15 & total_mL <= 20], na.rm = TRUE),
+  ecig_20to30_m = median(real_per_mL_price_paid[total_mL > 20 & total_mL <= 30], na.rm = TRUE),
+  ecig_30to50_m = median(real_per_mL_price_paid[total_mL > 30 & total_mL <= 50], na.rm = TRUE),
+  ecig_50plus_m = median(real_per_mL_price_paid[total_mL > 50], na.rm = TRUE)
 
 ), keyby = purchase_month]
-
 
 # Number of observations with NA for the median monthly prices
 nrow(dt_month_prices[!complete.cases(dt_month_prices)])
 
 # Get necessary columns so price data can be linked
-dt_prices <- dt[, .(household_code, purchase_month, fips_state_code, total_packs, total_flavored_mL, total_original_mL, 
+dt_prices <- dt[, .(household_code, purchase_month, fips_state_code, total_packs, total_mL, total_flavored_mL, total_original_mL,
                     real_per_pack_price_paid, real_per_mL_price_paid)]
 dt_prices[, names(dt_product_choices) := dt_product_choices]
 
@@ -618,36 +516,67 @@ dt_prices[
 # where prices are BOTH observation-specific (state-month) AND alternative-specific (quantity bin)
 #
 # This captures quantity discounts: buying in bulk has lower per-unit prices
-# IMPORTANT: Always use median prices, never actual prices (to avoid conditioning on choice)
+#
+# Hierarchical imputation (3 tiers):
+#   1. Actual price paid if the household chose alternative j
+#   2. State-month median price for bin j
+#   3. Monthly median price for bin j
+# Tier 1 uses the household's actual per-unit price only for the chosen alternative;
+# unchosen alternatives get NA and fall through to tier 2/3.
 
-# Cigarette alternatives: use state-month median, fall back to month median
-dt_prices[, cig_1to2_p   := fcoalesce(cig_1to2_sm, cig_1to2_m)]
-dt_prices[, cig_3to10_p  := fcoalesce(cig_3to10_sm, cig_3to10_m)]
-dt_prices[, cig_11to20_p := fcoalesce(cig_11to20_sm, cig_11to20_m)]
-dt_prices[, cig_21to30_p := fcoalesce(cig_21to30_sm, cig_21to30_m)]
-dt_prices[, cig_31to40_p := fcoalesce(cig_31to40_sm, cig_31to40_m)]
-dt_prices[, cig_41plus_p := fcoalesce(cig_41plus_sm, cig_41plus_m)]
+# Tier 1: Actual price paid if alternative j was chosen (NA otherwise)
+# Cigarette alternatives
+dt_prices[, cig_1_actual      := fifelse(cig_1 == 1,      real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_2_actual      := fifelse(cig_2 == 1,      real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_3to4_actual   := fifelse(cig_3to4 == 1,   real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_5to9_actual   := fifelse(cig_5to9 == 1,   real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_10_actual     := fifelse(cig_10 == 1,     real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_11to19_actual := fifelse(cig_11to19 == 1, real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_20_actual     := fifelse(cig_20 == 1,     real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_21to29_actual := fifelse(cig_21to29 == 1, real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_30_actual     := fifelse(cig_30 == 1,     real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_31to39_actual := fifelse(cig_31to39 == 1, real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_40_actual     := fifelse(cig_40 == 1,     real_per_pack_price_paid, NA_real_)]
+dt_prices[, cig_41plus_actual := fifelse(cig_41plus == 1, real_per_pack_price_paid, NA_real_)]
 
-# Original e-cigarette alternatives
-dt_prices[, orig_ecig_1to10_p  := fcoalesce(orig_ecig_1to10_sm, orig_ecig_1to10_m)]
-dt_prices[, orig_ecig_10to30_p := fcoalesce(orig_ecig_10to30_sm, orig_ecig_10to30_m)]
-dt_prices[, orig_ecig_30plus_p := fcoalesce(orig_ecig_30plus_sm, orig_ecig_30plus_m)]
+# E-cigarette alternatives (pooled: actual price assigned if household bought any ecig in this total_mL bin)
+dt_prices[, ecig_0to5_actual   := fifelse(total_mL > 0  & total_mL <= 5  & total_packs == 0, real_per_mL_price_paid, NA_real_)]
+dt_prices[, ecig_5to10_actual  := fifelse(total_mL > 5  & total_mL <= 10 & total_packs == 0, real_per_mL_price_paid, NA_real_)]
+dt_prices[, ecig_10to15_actual := fifelse(total_mL > 10 & total_mL <= 15 & total_packs == 0, real_per_mL_price_paid, NA_real_)]
+dt_prices[, ecig_15to20_actual := fifelse(total_mL > 15 & total_mL <= 20 & total_packs == 0, real_per_mL_price_paid, NA_real_)]
+dt_prices[, ecig_20to30_actual := fifelse(total_mL > 20 & total_mL <= 30 & total_packs == 0, real_per_mL_price_paid, NA_real_)]
+dt_prices[, ecig_30to50_actual := fifelse(total_mL > 30 & total_mL <= 50 & total_packs == 0, real_per_mL_price_paid, NA_real_)]
+dt_prices[, ecig_50plus_actual := fifelse(total_mL > 50 & total_packs == 0, real_per_mL_price_paid, NA_real_)]
 
-# Flavored e-cigarette alternatives
-dt_prices[, flav_ecig_0to10_p  := fcoalesce(flav_ecig_0to10_sm, flav_ecig_0to10_m)]
-dt_prices[, flav_ecig_10to30_p := fcoalesce(flav_ecig_10to30_sm, flav_ecig_10to30_m)]
-dt_prices[, flav_ecig_30plus_p := fcoalesce(flav_ecig_30plus_sm, flav_ecig_30plus_m)]
+# Final price columns: fcoalesce(actual, state-month median, monthly median)
+# Cigarette alternatives
+dt_prices[, cig_1_p      := fcoalesce(cig_1_actual, cig_1_sm, cig_1_m)]
+dt_prices[, cig_2_p      := fcoalesce(cig_2_actual, cig_2_sm, cig_2_m)]
+dt_prices[, cig_3to4_p   := fcoalesce(cig_3to4_actual, cig_3to4_sm, cig_3to4_m)]
+dt_prices[, cig_5to9_p   := fcoalesce(cig_5to9_actual, cig_5to9_sm, cig_5to9_m)]
+dt_prices[, cig_10_p     := fcoalesce(cig_10_actual, cig_10_sm, cig_10_m)]
+dt_prices[, cig_11to19_p := fcoalesce(cig_11to19_actual, cig_11to19_sm, cig_11to19_m)]
+dt_prices[, cig_20_p     := fcoalesce(cig_20_actual, cig_20_sm, cig_20_m)]
+dt_prices[, cig_21to29_p := fcoalesce(cig_21to29_actual, cig_21to29_sm, cig_21to29_m)]
+dt_prices[, cig_30_p     := fcoalesce(cig_30_actual, cig_30_sm, cig_30_m)]
+dt_prices[, cig_31to39_p := fcoalesce(cig_31to39_actual, cig_31to39_sm, cig_31to39_m)]
+dt_prices[, cig_40_p     := fcoalesce(cig_40_actual, cig_40_sm, cig_40_m)]
+dt_prices[, cig_41plus_p := fcoalesce(cig_41plus_actual, cig_41plus_sm, cig_41plus_m)]
 
-# Bundle alternatives (per-pack cig price and per-mL ecig price for bundle purchasers)
-dt_prices[, bundle_cig_p       := fcoalesce(bundle_cig_sm, bundle_cig_m)]
-dt_prices[, bundle_orig_ecig_p := fcoalesce(bundle_orig_ecig_sm, bundle_orig_ecig_m)]
-dt_prices[, bundle_flav_ecig_p := fcoalesce(bundle_flav_ecig_sm, bundle_flav_ecig_m)]
+# E-cigarette alternatives (pooled orig/flav — single ecig price state)
+dt_prices[, ecig_0to5_p   := fcoalesce(ecig_0to5_actual, ecig_0to5_sm, ecig_0to5_m)]
+dt_prices[, ecig_5to10_p  := fcoalesce(ecig_5to10_actual, ecig_5to10_sm, ecig_5to10_m)]
+dt_prices[, ecig_10to15_p := fcoalesce(ecig_10to15_actual, ecig_10to15_sm, ecig_10to15_m)]
+dt_prices[, ecig_15to20_p := fcoalesce(ecig_15to20_actual, ecig_15to20_sm, ecig_15to20_m)]
+dt_prices[, ecig_20to30_p := fcoalesce(ecig_20to30_actual, ecig_20to30_sm, ecig_20to30_m)]
+dt_prices[, ecig_30to50_p := fcoalesce(ecig_30to50_actual, ecig_30to50_sm, ecig_30to50_m)]
+dt_prices[, ecig_50plus_p := fcoalesce(ecig_50plus_actual, ecig_50plus_sm, ecig_50plus_m)]
 
 # Final price columns (one per alternative, varies by observation due to state-month)
-price_cols <- c("cig_1to2_p", "cig_3to10_p", "cig_11to20_p", "cig_21to30_p", "cig_31to40_p", "cig_41plus_p",
-                "orig_ecig_1to10_p", "orig_ecig_10to30_p", "orig_ecig_30plus_p",
-                "flav_ecig_0to10_p", "flav_ecig_10to30_p", "flav_ecig_30plus_p",
-                "bundle_cig_p", "bundle_orig_ecig_p", "bundle_flav_ecig_p")
+price_cols <- c("cig_1_p", "cig_2_p", "cig_3to4_p", "cig_5to9_p", "cig_10_p", "cig_11to19_p",
+                "cig_20_p", "cig_21to29_p", "cig_30_p", "cig_31to39_p", "cig_40_p", "cig_41plus_p",
+                "ecig_0to5_p", "ecig_5to10_p", "ecig_10to15_p", "ecig_15to20_p",
+                "ecig_20to30_p", "ecig_30to50_p", "ecig_50plus_p")
 
 # Number of NAs across price columns
 dt_prices[, sum(sapply(.SD, function(x) sum(is.na(x)))), .SDcols = price_cols]
@@ -670,13 +599,85 @@ if (file.exists(file_name))
 
 
 #############################
+# Price Ratios
+# (Quantity Discounts)
+#############################
+
+# Compute price ratios: median per-unit price in each bin / overall category median
+# These capture quantity discounts: small-quantity bins pay more per unit, large-quantity bins pay less
+# Ratios are fixed constants applied in the expenditure computation (get_expenditures() in Julia)
+
+# Overall category medians (across all purchasers regardless of quantity bin)
+overall_cig_price  <- dt[total_packs > 0, median(real_per_pack_price_paid, na.rm = TRUE)]
+overall_ecig_price <- dt[total_mL > 0,    median(real_per_mL_price_paid, na.rm = TRUE)]
+
+# Cigarette bin medians and ratios
+dt_price_ratios <- data.table(
+  alternative = c(
+    # Cigarette bins (cig-only purchasers)
+    "cig_1", "cig_2", "cig_3to4", "cig_5to9", "cig_10", "cig_11to19",
+    "cig_20", "cig_21to29", "cig_30", "cig_31to39", "cig_40", "cig_41plus",
+    # E-cig bins (pooled orig/flav, by total mL)
+    "ecig_0to5", "ecig_5to10", "ecig_10to15", "ecig_15to20",
+    "ecig_20to30", "ecig_30to50", "ecig_50plus"
+  ),
+  median_price = c(
+    # Cigarette bin medians
+    dt[total_packs == 1  & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs == 2  & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs >= 3  & total_packs <= 4  & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs >= 5  & total_packs <= 9  & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs == 10 & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs >= 11 & total_packs <= 19 & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs == 20 & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs >= 21 & total_packs <= 29 & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs == 30 & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs >= 31 & total_packs <= 39 & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs == 40 & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    dt[total_packs >= 41 & total_mL == 0, median(real_per_pack_price_paid, na.rm = TRUE)],
+    # E-cig bin medians (pooled orig/flav, by total mL)
+    dt[total_mL > 0  & total_mL <= 5,  median(real_per_mL_price_paid, na.rm = TRUE)],
+    dt[total_mL > 5  & total_mL <= 10, median(real_per_mL_price_paid, na.rm = TRUE)],
+    dt[total_mL > 10 & total_mL <= 15, median(real_per_mL_price_paid, na.rm = TRUE)],
+    dt[total_mL > 15 & total_mL <= 20, median(real_per_mL_price_paid, na.rm = TRUE)],
+    dt[total_mL > 20 & total_mL <= 30, median(real_per_mL_price_paid, na.rm = TRUE)],
+    dt[total_mL > 30 & total_mL <= 50, median(real_per_mL_price_paid, na.rm = TRUE)],
+    dt[total_mL > 50, median(real_per_mL_price_paid, na.rm = TRUE)]
+  ),
+  overall_median = c(
+    # Cig bins use overall cig median
+    rep(overall_cig_price, 12),
+    # Ecig bins use overall ecig median
+    rep(overall_ecig_price, 7)
+  )
+)
+
+# Compute ratios
+dt_price_ratios[, ratio := median_price / overall_median]
+dt_price_ratios
+
+# Write to file
+file_name <- "../Dynamic_Model/Data/Price_Ratios.csv"
+fwrite(dt_price_ratios, file_name)
+
+# Confirm results have been written to a file
+if (file.exists(file_name))
+{
+  cat("\nResults have been written to\n", file_name, "\n")
+} else
+{
+  cat("Error: File could not be written\n")
+}
+
+
+#############################
 # Lagged Category Choice
 # (State Dependence)
 #############################
 
-# Build household-month panel with category choice and sort by household then month
+# Build household-month panel with category choice
+# Raw CSV is pre-sorted by (household_code, purchase_month) — no additional sorting needed.
 dt_lag <- dt[, .(household_code, purchase_month, outside_option, cig, ecig, cig_ecig)]
-setorder(dt_lag, household_code, purchase_month)
 
 # Create a numeric category indicator:
 #   0 = outside option, 1 = cig, 2 = ecig, 3 = cig_ecig
@@ -785,57 +786,6 @@ if (file.exists(file_name))
 {
   cat("Error: File could not be written\n")
 }
-
-
-#############################
-# Mean Consumption per
-# Household (Mundlak)
-# # Used for Mundlak 
-# correction to control for 
-# persistent unobserved 
-# heterogeneity
-# in the static logit and 
-# dynamic models
-#############################
-
-# Create data table with household code and consumption quantities
-dt_mundlak <- dt[, .(
-  household_code,
-  total_packs,
-  total_mL
-)]
-
-# Compute mean consumption per household
-dt_mean_consumption <- dt_mundlak[, .(
-  mean_cig_consumption  = mean(total_packs, na.rm = TRUE),
-  mean_ecig_consumption = mean(total_mL, na.rm = TRUE)
-), keyby = household_code]
-
-# Merge back to observation-level data to get mean consumption for each observation
-dt_mundlak[
-  dt_mean_consumption,
-  on = .(household_code),
-  `:=`(mean_cig_consumption  = i.mean_cig_consumption,
-       mean_ecig_consumption = i.mean_ecig_consumption)
-]
-
-# Keep only the mean consumption columns (order matches dt rows)
-dt_mean_consumption_obs <- dt_mundlak[, .(mean_cig_consumption, mean_ecig_consumption)]
-
-# Write the data to a file
-file_name <- "../Dynamic_Model/Data/Mean_Consumption.csv"
-fwrite(dt_mean_consumption_obs, file_name)
-
-# Confirm results have been written to a file
-if (file.exists(file_name))
-{
-  cat("Results have been written to\n", file_name, "\n")
-} else
-{
-  cat("Error: File could not be written\n")
-}
-
-
 
 
 

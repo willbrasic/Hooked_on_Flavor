@@ -16,21 +16,7 @@
 # Logging
 #############################
 
-# Global log file handle (set by 02_Counterfactual_Flavor_Ban.jl before any logging)
-cf_log_io = nothing
-
-"""
-Write a message to the counterfactual log file and flush immediately.
-Also prints to stdout as a fallback.
-"""
-function cf_log(msg::String)
-    global cf_log_io
-    println(msg)
-    if cf_log_io !== nothing
-        println(cf_log_io, msg)
-        flush(cf_log_io)
-    end
-end
+# Uses log_io and log_msg() from 01_Functions.jl (included before this file).
 
 
 #############################
@@ -40,9 +26,11 @@ end
 """
 Apply a flavor ban by setting flow utility to -Inf for all flavored alternatives.
 
-Flavored alternatives are those with cat_idx[j] ∈ {3, 5}:
-  - cat_idx = 3: flavored e-cigarettes (j = 11:13)
-  - cat_idx = 5: flavored bundles (j = 18:21)
+Flavored alternatives are those with cat_idx[j] ∈ {3, 4, 6, 7}:
+  - cat_idx = 3: non-FDA flavored e-cigarettes
+  - cat_idx = 4: FDA flavored e-cigarettes
+  - cat_idx = 6: bundles with non-FDA flavored e-cig
+  - cat_idx = 7: bundles with FDA flavored e-cig
 
 Setting U = -Inf means exp(U) = 0 in the logsumexp, so banned alternatives
 get zero choice probability. VFI contraction property is maintained because
@@ -58,7 +46,7 @@ function apply_flavor_ban!(
     N_J = size(U_ban, 2)
 
     for j in 1:N_J
-        if cat_idx[j] == 3 || cat_idx[j] == 5
+        if cat_idx[j] in (3, 4, 6, 7)
             U_ban[:, j, :, :] .= -Inf
         end
     end
@@ -148,7 +136,7 @@ For each household h with initial state (tya_h, a_h, p_cig_h, p_ecig_h):
       1. Interpolate V_choice at continuous state
       2. Compute softmax choice probabilities
       3. Draw choice from categorical distribution
-      4. Update addiction: a' = (1-ψ)a + n[j]
+      4. Update addiction: ã' = (1-ψ)ã + ψ·n[j]
       5. Update prices: p' = φ₀ + φ₁·p + L_chol·ε
 
 Returns:
@@ -222,8 +210,9 @@ function simulate_trajectories(
                 j = categorical_sample(probs)
                 sim_choices[h, t, d] = j
 
-                # Update addiction: a' = (1-ψ)a + n[j]
-                a_h = (1 - ψ) * a_h + n[j]
+                # Update addiction: ã' = (1-ψ)ã + ψ·n[j]
+                # a_h is ã (normalized addiction); n[j] is n_std (standardized nicotine)
+                a_h = (1 - ψ) * a_h + ψ * n[j]
                 a_h = clamp(a_h, A[1], A[end])
                 sim_addiction[h, t, d] = a_h
 
@@ -249,12 +238,13 @@ addiction, and mean welfare.
 
 Category mapping:
   0 = outside option, 1 = cigarettes, 2 = original e-cig,
-  3 = flavored e-cig, 4 = original bundle, 5 = flavored bundle
+  3 = non-FDA flavored e-cig, 4 = FDA flavored e-cig,
+  5 = original bundle, 6 = non-FDA flavored bundle, 7 = FDA flavored bundle
 
 Returns:
 - DataFrame with columns: period, share_outside, share_cig, share_orig_ecig,
-  share_flav_ecig, share_orig_bundle, share_flav_bundle, mean_addiction,
-  mean_welfare
+  share_non_fda_flav_ecig, share_fda_flav_ecig, share_orig_bundle,
+  share_non_fda_flav_bundle, share_fda_flav_bundle, mean_addiction, mean_welfare
 """
 function aggregate_simulation(
     sim_choices::Array{Int, 3},
@@ -270,25 +260,28 @@ function aggregate_simulation(
 
     # Category names for output
     cat_names = ["share_outside", "share_cig", "share_orig_ecig",
-                 "share_flav_ecig", "share_orig_bundle", "share_flav_bundle"]
+                 "share_non_fda_flav_ecig", "share_fda_flav_ecig",
+                 "share_orig_bundle", "share_non_fda_flav_bundle", "share_fda_flav_bundle"]
 
     # Initialize result storage
     results = DataFrame(
-        period            = 1:T_sim,
-        share_outside     = zeros(Float64, T_sim),
-        share_cig         = zeros(Float64, T_sim),
-        share_orig_ecig   = zeros(Float64, T_sim),
-        share_flav_ecig   = zeros(Float64, T_sim),
-        share_orig_bundle = zeros(Float64, T_sim),
-        share_flav_bundle = zeros(Float64, T_sim),
-        mean_addiction    = zeros(Float64, T_sim),
-        mean_welfare      = zeros(Float64, T_sim)
+        period                    = 1:T_sim,
+        share_outside             = zeros(Float64, T_sim),
+        share_cig                 = zeros(Float64, T_sim),
+        share_orig_ecig           = zeros(Float64, T_sim),
+        share_non_fda_flav_ecig   = zeros(Float64, T_sim),
+        share_fda_flav_ecig       = zeros(Float64, T_sim),
+        share_orig_bundle         = zeros(Float64, T_sim),
+        share_non_fda_flav_bundle = zeros(Float64, T_sim),
+        share_fda_flav_bundle     = zeros(Float64, T_sim),
+        mean_addiction            = zeros(Float64, T_sim),
+        mean_welfare              = zeros(Float64, T_sim)
     )
 
     for t in 1:T_sim
 
         # Count category shares across all households and draws
-        cat_counts = zeros(Float64, 6)  # cats 0-5
+        cat_counts = zeros(Float64, 8)  # cats 0-7
         total_addiction = 0.0
         total_welfare   = 0.0
 
@@ -304,14 +297,16 @@ function aggregate_simulation(
         end
 
         # Compute shares and means
-        results.share_outside[t]     = cat_counts[1] / N_total
-        results.share_cig[t]         = cat_counts[2] / N_total
-        results.share_orig_ecig[t]   = cat_counts[3] / N_total
-        results.share_flav_ecig[t]   = cat_counts[4] / N_total
-        results.share_orig_bundle[t] = cat_counts[5] / N_total
-        results.share_flav_bundle[t] = cat_counts[6] / N_total
-        results.mean_addiction[t]    = total_addiction / N_total
-        results.mean_welfare[t]      = total_welfare / N_total
+        results.share_outside[t]             = cat_counts[1] / N_total
+        results.share_cig[t]                 = cat_counts[2] / N_total
+        results.share_orig_ecig[t]           = cat_counts[3] / N_total
+        results.share_non_fda_flav_ecig[t]   = cat_counts[4] / N_total
+        results.share_fda_flav_ecig[t]       = cat_counts[5] / N_total
+        results.share_orig_bundle[t]         = cat_counts[6] / N_total
+        results.share_non_fda_flav_bundle[t] = cat_counts[7] / N_total
+        results.share_fda_flav_bundle[t]     = cat_counts[8] / N_total
+        results.mean_addiction[t]            = total_addiction / N_total
+        results.mean_welfare[t]              = total_welfare / N_total
     end
 
     return results
