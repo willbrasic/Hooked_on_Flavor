@@ -29,11 +29,11 @@ Estimates a static conditional logit model of tobacco product demand. The key fi
 
 Uses shared functions from `01_Functions.jl` to load:
 - Product choices (40 alternatives), choice vector y
-- Consumption vectors (c_cig, c_ecig, c_bundle), category indices, split flavored indicators (is_non_fda_flavored, is_fda_flavored)
+- Consumption vectors (q_cig, q_ecig, q_bundle), category indices, flavored indicators (is_flavored, is_fda_flavored)
 - TYA (teen/young adult) binary indicator
 - Continuous prices via `map_prices_to_grid` (only the continuous prices are used, not the grid indices)
 
-**Important:** `get_consumption()` returns STANDARDIZED consumption (divided by max). The static logit converts back to RAW values (`c_cig = c_cig_std * c_cig_max`) so that estimates are in **original units** (utils per pack, utils per mL, etc.). This allows the estimates to be used as starting values in the dynamic model after conversion to standardized units.
+**Important:** `get_consumption()` returns STANDARDIZED consumption (divided by max). The static logit converts back to RAW values (`q_cig = q_cig_std * q_cig_max`) so that estimates are in **original units** (utils per pack, utils per mL, etc.). This allows the estimates to be used as starting values in the dynamic model after conversion to standardized units.
 
 Additionally loads:
 - `Lagged_Category_Choice.csv` for the state dependence term. Observations with missing lagged choice (first month per household) are dropped.
@@ -42,49 +42,49 @@ Additionally loads:
 
 | Matrix | Dimension | Description |
 |--------|-----------|-------------|
-| `fe_T`, `fe_E`, `fe_TE` | N_J | Boolean fixed effect indicators by alternative (cig, ecig categories 2-4, bundle categories 5-7) |
-| `c_bundle` | N_J | Pre-computed `c_cig[j] * c_ecig[j]` for bundle interaction |
-| `E_obs[i, j]` | N_obs x N_J | Observation-level expenditure: `p_cig[i] * c_cig[j] + p_ecig[i] * c_ecig[j]` |
+| `fe_C`, `fe_E`, `fe_CE` | N_J | Boolean fixed effect indicators by alternative (cig, ecig categories 2-4, bundle categories 5-7) |
+| `q_bundle` | N_J | Pre-computed `q_cig[j] * q_ecig[j]` for bundle interaction |
+| `E_obs[i, j]` | N_obs x N_J | Observation-level expenditure: `p_cig[i] * q_cig[j] + p_ecig[i] * q_ecig[j]` |
 | `lag_match[i, j]` | N_obs x N_J | 1 if alternative j's category matches the household's lagged category choice |
 
 ### Structural Parameters (12)
 
 ```
-α_T   = cigarette consumption utility (per pack)
+α_C   = cigarette consumption utility (per pack)
 α_E   = e-cig consumption utility (per mL)
-α_TE  = bundle interaction utility (per pack × mL)
-λ_1   = non-FDA flavor baseline effect
-λ_2   = non-FDA flavor × teen/young adult interaction
-λ_3   = FDA flavor baseline effect
-λ_4   = FDA flavor × teen/young adult interaction
+α_CE  = bundle interaction utility (per pack × mL)
+λ_1   = flavor baseline effect (all flavored products)
+λ_2   = flavor × teen/young adult interaction (all flavored products)
+λ_3   = FDA flavor baseline effect (additional for FDA-authorized)
+λ_4   = FDA flavor × teen/young adult interaction (additional for FDA-authorized)
 ρ     = state dependence (lagged category match)
 ω     = expenditure coefficient (price sensitivity)
-ξ_T   = cigarette fixed effect
+ξ_C   = cigarette fixed effect
 ξ_E   = e-cig fixed effect
-ξ_TE  = bundle fixed effect
+ξ_CE  = bundle fixed effect
 ```
 
 ### Flow Utility
 
 ```
-v(j, i) = α_T * c_cig[j] + α_E * c_ecig[j] + α_TE * c_bundle[j]
-         + 𝟙[non-FDA flav] * (λ_1 + λ_2 * tya[i])
+v(j, i) = α_C * q_cig[j] + α_E * q_ecig[j] + α_CE * q_bundle[j]
+         + 𝟙[flavored] * (λ_1 + λ_2 * tya[i])
          + 𝟙[FDA flav] * (λ_3 + λ_4 * tya[i])
          + ρ * lag_match[i, j]
          + ω * E_obs[i, j]
-         + ξ_T * fe_T[j] + ξ_E * fe_E[j] + ξ_TE * fe_TE[j]
+         + ξ_C * fe_C[j] + ξ_E * fe_E[j] + ξ_CE * fe_CE[j]
 ```
 
-where `E_obs[i, j] = p_cig[i] * c_cig[j] + p_ecig[i] * c_ecig[j]` is total expenditure, non-FDA flav = cat ∈ {3, 6}, and FDA flav = cat ∈ {4, 7}.
+where `E_obs[i, j] = p_cig[i] * q_cig[j] + p_ecig[i] * q_ecig[j]` is total expenditure, flavored = cat ∈ {3, 4, 6, 7} (all flavored), and FDA flav = cat ∈ {4, 7} (additional effect for FDA-authorized).
 
 Compared to the dynamic model, the static model:
-- **Drops:** addiction terms (μ·a·n[j] and γ·a) since there is no addiction state
+- **Drops:** addiction terms (γ·a and μ·a·n[j]) since there is no addiction state
 - **Adds:** state dependence (ρ·lag_match) as a reduced-form proxy for habit persistence
 - **Uses:** continuous observed prices rather than discretized price grid states
 
 ### Negative Log-Likelihood
 
-`neg_log_likelihood(θ_vec, N_obs, N_J, tya, y, c_cig, c_ecig, c_bundle, is_non_fda_flavored, is_fda_flavored, lag_match, E_obs, fe_T, fe_E, fe_TE)` computes the observation-level log-likelihood:
+`neg_log_likelihood(θ_vec, N_obs, N_J, tya, y, q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, lag_match, E_obs, fe_C, fe_E, fe_CE)` computes the observation-level log-likelihood:
 
 1. Loop over observations
 2. For each observation, compute deterministic utility for all N_J alternatives
@@ -136,11 +136,11 @@ Uses `log_msg()` from `01_Functions.jl` (prints to stdout and writes to `log_io`
 
 | Parameter | Conversion to Standardized Units |
 |-----------|----------------------------------|
-| α_T | α_T_std = α_T_orig × c_cig_max |
-| α_E | α_E_std = α_E_orig × c_ecig_max |
-| α_TE | α_TE_std = α_TE_orig × c_bundle_max |
+| α_C | α_C_std = α_C_orig × q_cig_max |
+| α_E | α_E_std = α_E_orig × q_ecig_max |
+| α_CE | α_CE_std = α_CE_orig × q_bundle_max |
 | ω | ω_std = ω_orig × E_max |
-| λ_1, λ_2, λ_3, λ_4, ρ, ξ_T, ξ_E, ξ_TE | No conversion (multiply indicators/additive) |
+| λ_1, λ_2, λ_3, λ_4, ρ, ξ_C, ξ_E, ξ_CE | No conversion (multiply indicators/additive) |
 
 ---
 
@@ -152,7 +152,7 @@ Estimates a **static nested logit** model of tobacco product demand. Same data a
 
 **Working directory:** Same as `03_Static_Logit.jl`.
 
-**Output directory:** `.../4th_Year_Paper_Data/HMS/2021-Onward/Static_Nested_Logit_Results/`
+**Output directory:** `.../4th_Year_Paper_Data/HMS/2021-Onward/Static_Logit_Results/`
 
 ### Nesting Structure (4 nests, 1 common σ)
 
@@ -186,7 +186,7 @@ Numerically stable via logsumexp throughout. When σ → 0, reduces to standard 
 Same 12 parameters as `03_Static_Logit.jl` plus σ_raw:
 
 ```
-α_T, α_E, α_TE, λ_1, λ_2, λ_3, λ_4, ρ, ω, ξ_T, ξ_E, ξ_TE, σ_raw
+α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, ρ, ω, ξ_C, ξ_E, ξ_CE, σ_raw
 ```
 
 ### Pre-computed Nest Structure
@@ -214,7 +214,7 @@ After estimation, the transformed σ̂ and its SE are reported:
 **Interpretation:** σ is statistically significant but modest. Within-nest substitution is 1/(1-0.12) ≈ 14% stronger than across-nest. This indicates the IIA assumption in the dynamic model is not severely violated. The nested logit is used as a robustness check rather than being incorporated into the dynamic model, where the implementation cost (modifying VFI, likelihood, counterfactual, MC code) would be substantial relative to the modest departure from IIA.
 
 **Parameter changes from standard logit → nested logit:**
-- α_T, α_E, ω: stable (< 15% change)
+- α_C, α_E, ω: stable (< 15% change)
 - λ_1: dropped ~38% (0.852 → 0.532) — flavor effects were partly absorbing within-nest substitution
 - λ_2: dropped ~29% (0.703 → 0.502)
 - ξ_E: less negative (-6.500 → -5.864)
@@ -230,23 +230,22 @@ After estimation, the transformed σ̂ and its SE are reported:
 
 Estimates the addiction decay rate ψ from the reduced-form persistence of nicotine consumption via AR(1) regression. Written in R using data.table and fixest. Reads the same processed CSVs from `.../Dynamic_Model/Data/` used by the structural model.
 
-**Main specification (Mundlak/CRE):**
+**Main specification (household FE + Nickell correction):**
 ```
-n_it = α + ρ · n_{i,t-1} + β_1 · p_cig_it + β_2 · p_ecig_it
-     + β_3 · mean_cig_i + β_4 · mean_ecig_i + ε_it
+nicotine ~ lag_nicotine | household_code + purchase_month
 ```
-Estimated via OLS with `fixest::feols`, clustered SEs at household level. **ψ̂ = 1 - ρ̂**, SE(ψ̂) = SE(ρ̂) by delta method.
+Estimated via `fixest::feols` with household and month fixed effects, clustered SEs at household level. The raw FE estimate ρ̂_FE is biased downward by Nickell bias in short panels, so a Nickell correction is applied: `ρ_corrected = (ρ_FE × (T_bar - 1) + 1) / (T_bar - 2)` where T_bar is the average number of time periods per household. **ψ̂ = 1 - ρ̂_corrected**.
 
 **Models estimated:**
-1. Mundlak CRE (main specification)
+1. Mundlak CRE
 2. Mundlak CRE + month fixed effects
 3. Separate cig and ecig AR(1)s (product-specific persistence)
-4. Household FE (Nickell-biased comparison)
+4. Household FE + month FE with Nickell bias correction (main specification)
 
-**Key results:** ρ̂ ≈ 0.52 (Mundlak), implying ψ̂ ≈ 0.48. Household FE gives ρ̂ ≈ 0.25 (biased downward by Nickell bias in short panels). The main estimate ψ̂ = 0.4801 is used as the fixed value in the dynamic model.
+**Key results:** ρ̂_corrected ≈ 0.3216 (household FE + Nickell correction), implying ψ̂ ≈ 0.6784. The Mundlak/CRE specification gives ρ̂ ≈ 0.52 (ψ̂ ≈ 0.48), but the household FE + Nickell correction is preferred because it directly controls for time-invariant unobserved heterogeneity.
 
-**Why Mundlak over household FE:** With a lagged dependent variable + household FE, demeaning creates mechanical negative correlation between the demeaned lag and demeaned error (Nickell, 1981), biasing ρ̂ downward (and ψ̂ upward). The Mundlak/CRE approach (household means as controls) avoids this.
+**Why household FE + Nickell correction:** With a lagged dependent variable + household FE, demeaning creates mechanical negative correlation between the demeaned lag and demeaned error (Nickell, 1981), biasing ρ̂ downward. The Nickell correction formula adjusts for this bias analytically, recovering a consistent estimate of ρ. This approach is preferred over Mundlak/CRE because it directly absorbs all time-invariant household heterogeneity via fixed effects rather than relying on household means as proxies.
 
 ### Relationship to Dynamic Model
 
-ψ̂ = 0.4801 is fixed in all structural estimation code via `get_fixed_parameters()` in `01_Functions.jl`. This resolves the ψ-μ identification ridge found in MC simulations where the optimizer found high ψ (~0.875) + negligible μ instead of the true values.
+ψ̂ = 0.6784 is fixed in all structural estimation code via `get_fixed_parameters()` in `01_Functions.jl`. This resolves the ψ-μ identification ridge found in MC simulations where the optimizer found high ψ (~0.875) + negligible μ instead of the true values.

@@ -18,9 +18,8 @@ HMS/
 │   │   ├── 04_State_Transitions.R
 │   │   └── 05_TYA_State_Transitions.R
 │   ├── 02_Second_Stage_Estimation/   # Structural parameter estimation + SEs
-│   │   ├── 01_Functions.jl
-│   │   ├── 01_Functions_Beta.jl
-│   │   ├── 02_Estimation.jl
+│   │   ├── 01_Functions.jl           # ESTIMATE_BETA, ESTIMATE_PSI, WARM_START flags
+│   │   ├── 02_Estimation.jl          # ESTIMATE_BETA, ESTIMATE_PSI, WARM_START flags
 │   │   ├── 02_Estimation_Slurm.sb
 │   │   └── 03_Standard_Errors.jl
 │   ├── 03_Model_Validation/         # Model fit: predicted vs actual shares
@@ -29,16 +28,12 @@ HMS/
 │   ├── 04_Counterfactual_Flavor_Ban/ # Policy counterfactual simulations
 │   │   ├── 01_Counterfactual_Functions.jl
 │   │   └── 02_Counterfactual_Flavor_Ban.jl
-│   ├── 05_MC_Simulation/            # Monte Carlo parameter recovery
+│   ├── 05_MC_Simulation/            # Monte Carlo parameter recovery (ESTIMATE_BETA, ESTIMATE_PSI, WARM_START flags)
 │   │   ├── 01_MC_Simulation_Functions.jl
-│   │   ├── 02_MC_Simulation_Array.jl
+│   │   ├── 02_MC_Simulation_Array.jl   # ESTIMATE_BETA, ESTIMATE_PSI, WARM_START flags
 │   │   ├── 02_MC_Simulation_Array_Slurm.sb
 │   │   ├── 03_MC_Aggregate_Results.jl
 │   │   └── 04_Two_Param_Profile.jl
-│   └── 05_MC_Simulation_Beta/       # Monte Carlo with β (present bias) estimation
-│       ├── 01_MC_Simulation_Functions_Beta.jl
-│       ├── 02_MC_Simulation_Array_Beta.jl
-│       └── 02_MC_Simulation_Array_Beta_Slurm.sb
 ```
 
 ## Data Locations
@@ -58,16 +53,20 @@ One level above `Data/`. MC simulation reads these via `../AR_Parameters/`.
 **Output files by script:**
 | Script | Output Directory |
 |--------|-----------------|
-| `02_Estimation.jl` | `.../Dynamic_Model_Results/` |
-| `03_Standard_Errors.jl` | `.../Dynamic_Model_Results/` |
+| `02_Estimation.jl` | `.../Dynamic_Model_<psi_tag>_<beta_tag>_Results/` |
+| `03_Standard_Errors.jl` | `.../Dynamic_Model_<psi_tag>_<beta_tag>_Results/` |
 | `02_Model_Validation.jl` | `.../Dynamic_Model/Model_Validation_Results/` |
 | `02_Counterfactual_Flavor_Ban.jl` | `.../Dynamic_Model/Counterfactual_Results/` |
-| `02_MC_Simulation_Array.jl` | `.../MC_Simulation_Results/` |
-| `02_MC_Simulation_Array_Beta.jl` | `.../MC_Simulation_Beta_Results/` |
+| `02_MC_Simulation_Array.jl` | `.../MC_Simulation_<psi_tag>_<beta_tag>_Results/` |
 | `03_Static_Logit.jl` | `.../Static_Logit_Results/` |
-| `04_Static_Nested_Logit.jl` | `.../Static_Nested_Logit_Results/` |
+| `04_Static_Nested_Logit.jl` | `.../Static_Logit_Results/` |
 
 All under `.../4th_Year_Paper_Data/HMS/2021-Onward/`.
+
+**Output directory naming conventions:**
+- `<psi_tag>`: `Psi_0.68` when ESTIMATE_PSI = false; `Psi_Estimated` when ESTIMATE_PSI = true
+- `<beta_tag>`: `Beta_1.0` when ESTIMATE_BETA = false; `Beta_Estimated` when ESTIMATE_BETA = true
+- Examples: `Dynamic_Model_Psi_0.68_Beta_1.0_Results/`, `MC_Simulation_Psi_Estimated_Beta_Estimated_Results/`
 
 ## First Stage Estimation (`01_First_Stage_Estimation/`)
 
@@ -86,7 +85,7 @@ Prepares the discrete choice data from HMS panel data.
 | `Prices.csv` | Per-unit prices using hierarchical imputation (actual → state-month median → month median) |
 | `Lagged_Category_Choice.csv` | Lagged category choice indicators (lagged_cig, lagged_ecig, lagged_cig_ecig); NA for each household's first month |
 | `Lead_Prices.csv` | Next month's median per-unit prices (lead_cig_price, lead_ecig_price) using hierarchical imputation (state-month → month); NA for last sample month |
-| `Mean_Consumption.csv` | Household mean consumption (mean_cig_consumption, mean_ecig_consumption) for Mundlak correction; controls for persistent unobserved heterogeneity |
+| `Mean_Consumption.csv` | Household mean consumption (mean_cig_consumption, mean_ecig_consumption); controls for persistent unobserved heterogeneity |
 
 **Choice alternatives (40 total):**
 - Outside option (no purchase)
@@ -189,12 +188,14 @@ Packages (CSV, DataFrames, Optim, Statistics, ForwardDiff) are installed if miss
 |----------|---------|
 | `log_io` | Global log file handle (`IO` or `nothing`). Each calling script sets this once before logging (e.g., `log_io = open("Estimation_Log.txt", "w")`). Shared across all scripts — estimation, MC, validation, and counterfactual all use this single handle. |
 | `est_eval_count` | Global objective evaluation counter. Reset to 0 before each estimation run. |
+| `ra_outer_try`, `ra_inner_run` | Global optimizer phase tracking (updated by `random_amoeba`). `ra_outer_try`: current outer try (1 to L). `ra_inner_run`: current inner run (1 to M), or 0 for the long convergence run. Used by warm-start phase detection. |
+| `V_warm_est`, `last_ra_phase_est` | Warm-start state for `objective()`. `V_warm_est` stores the converged V from the previous VFI solve within a NM run. `last_ra_phase_est` tracks `(outer_try, inner_run)`; V resets when phase changes. Only active when `WARM_START = true`. |
 | `log_msg(msg)` | Prints `msg` to stdout and writes it to `log_io` (if open). Every write is followed by `flush`. |
 
 **State Spaces and Choices:**
 | Function | Purpose |
 |----------|---------|
-| `get_fixed_parameters()` | Returns `(ψ, β, δ)` where ψ is fixed from reduced-form AR(1) estimate, β=1.0, δ=0.99 |
+| `get_fixed_parameters()` | Returns `(ψ, β, δ)` where ψ is fixed at 0.68 (overridden by optimizer when ESTIMATE_PSI = true), β=1.0, δ=0.99 |
 | `get_addiction_space(ψ)` | Creates normalized addiction grid: N_A=20 points from 0 to 1 |
 | `get_product_choices()` | Loads product choice matrix J, returns (N_HHT, N_J, J) |
 | `get_HH_choices(J)` | Converts choice matrix J to choice vector y (y[i] = chosen alternative index) |
@@ -203,13 +204,12 @@ Packages (CSV, DataFrames, Optim, Statistics, ForwardDiff) are installed if miss
 **Alternative-Level Vectors:**
 | Function | Purpose |
 |----------|---------|
-| `get_consumption(N_J)` | Returns separate c_cig, c_ecig, c_bundle vectors indexed by alternative j, plus counts per category (N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, N_bundle). For 6 bundles (2 orig + 2 non-FDA flav + 2 FDA flav), reads columns like `bundle_orig_lo_cig`, `bundle_non_fda_flav_lo_ecig`, etc. Also returns c_cig_max, c_ecig_max, c_bundle_max for rescaling. |
+| `get_consumption(N_J)` | Returns separate q_cig, q_ecig, q_bundle vectors indexed by alternative j, plus counts per category (N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, N_bundle). For 6 bundles (2 orig + 2 non-FDA flav + 2 FDA flav), reads columns like `bundle_orig_lo_cig`, `bundle_non_fda_flav_lo_ecig`, etc. Also returns q_cig_max, q_ecig_max, q_bundle_max for rescaling. |
 | `get_nicotine(N_J)` | Returns nicotine vector n[j] (mg absorbed) for each alternative; bundles sum cig + ecig nicotine using columns with `_cig_nic` and `_ecig_nic` suffixes. Also returns n_max for rescaling. |
 | `get_category_index(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig)` | Returns cat_idx[j] mapping each alternative to its category (0=outside, 1=cig, 2=orig ecig, 3=non-FDA flav ecig, 4=FDA flav ecig, 5=orig bundle, 6=non-FDA flav bundle, 7=FDA flav bundle). Handles 2 orig + 2 non-FDA flav + 2 FDA flav bundles. |
-| `get_non_fda_flavored_indicator(cat_idx)` | Returns boolean vector; true for non-FDA flavored ecig (cat=3) and bundle with non-FDA flavored ecig (cat=6) |
 | `get_fda_flavored_indicator(cat_idx)` | Returns boolean vector; true for FDA flavored ecig (cat=4) and bundle with FDA flavored ecig (cat=7) |
-| `get_flavored_indicator(cat_idx)` | Returns boolean vector; true for any flavored alternative (cat ∈ {3, 4, 6, 7}). Union of non-FDA and FDA flavored. Used by static logit only. |
-| `get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, c_cig, c_ecig)` | Returns price ratio vectors for quantity discount adjustment. Price per unit varies by bin size within each category. |
+| `get_flavored_indicator(cat_idx)` | Returns boolean vector; true for any flavored alternative (cat ∈ {3, 4, 6, 7}). Union of non-FDA and FDA flavored. Used by `get_flow_utility()` for λ₁, λ₂ terms. |
+| `get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, q_cig, q_ecig)` | Returns price ratio vectors for quantity discount adjustment. Price per unit varies by bin size within each category. |
 
 **Demographics:**
 | Function | Purpose |
@@ -217,14 +217,14 @@ Packages (CSV, DataFrames, Optim, Statistics, ForwardDiff) are installed if miss
 | `get_teen_young_adult()` | Loads binary youth indicator, returns (N_HH, tya). Used by static logit only. |
 | `get_tya_state(tya)` | Maps binary TYA indicator to state index (0 → 1, 1 → 2). Used by static logit only. |
 | `get_tya_states()` | Loads 4-state TYA classification from `TYA_States.csv` (produced by `05_TYA_State_Transitions.R`). Returns `tya_state` vector with values 1-4. Used by dynamic estimation, SE, model validation, counterfactual, and MC. |
-| `get_tya_transitions()` | Loads 4×4 monthly TYA transition matrix from `TYA_Transition_Matrix.csv`. Returns row-stochastic matrix Π_tya where Π_tya[s, s'] = P(TYA' = s' \| TYA = s). Used by all VFI calls. |
+| `get_tya_transitions()` | Loads 4×4 monthly TYA transition matrix from `TYA_Transition_Matrix.csv`. Returns row-stochastic matrix Π where Π[s, s'] = P(TYA' = s' \| TYA = s). Used by all VFI calls. |
 
 **Price Space:**
 | Function | Purpose |
 |----------|---------|
 | `get_pricing_spaces()` | Loads 10-point price grid per category, returns (N_P, P) |
 | `get_pricing_spaces_combination(N_K, N_P, P)` | Creates N_P^2=100 (cig x ecig) price combinations |
-| `get_expenditures(N_J, N_Pcomb, c_cig, c_ecig, c_cig_max, c_ecig_max, Pcomb, ratio_cig, ratio_ecig)` | Computes E[p,j] = p_cig(p)*c_cig[j] + p_ecig(p)*c_ecig[j] for all price-alternative pairs, standardized by E_max. Also returns E_max for rescaling. |
+| `get_expenditures(N_J, N_Pcomb, q_cig, q_ecig, q_cig_max, q_ecig_max, Pcomb, ratio_cig, ratio_ecig)` | Computes E[p,j] = p_cig(p)*q_cig[j] + p_ecig(p)*q_ecig[j] for all price-alternative pairs, standardized by E_max. Also returns E_max for rescaling. |
 | `get_transitions(N_K)` | Loads Halton draw price transitions: M x R x 2 array |
 | `precompute_price_transitions(N_P, P, T)` | Pre-computes bilinear interpolation brackets and weights for predicted next-period prices from Halton draws. For each (price state, draw) pair, clamps predictions to grid bounds, finds brackets on each category's 1D grid via binary search. Returns 6 matrices (M × R): `p_cig_lo`, `p_cig_hi`, `p_cig_w`, `p_ecig_lo`, `p_ecig_hi`, `p_ecig_w`. Called once since price transitions don't change across VFI iterations. |
 
@@ -237,7 +237,7 @@ Packages (CSV, DataFrames, Optim, Statistics, ForwardDiff) are installed if miss
 | Function | Purpose |
 |----------|---------|
 | `addiction_evolution(ψ, a, n)` | Addiction law of motion in normalized units: ã' = (1-ψ)ã + ψ·n |
-| `get_flow_utility(θ, N_J, N_A, N_Pcomb, A, c_cig, c_ecig, c_bundle, n, is_non_fda_flavored, is_fda_flavored, cat_idx, E)` | Pre-computes flow utility for all (tya, alternative, addiction, price) states. Takes 13-element θ (excludes ψ). Returns 4D array U[tya_idx, j, a_idx, p_idx] of dimension 4 × N_J × N_A × N_Pcomb. TYA indicator: states 1,2 → tya=0; states 3,4 → tya=1. Reinforcement term: μ·a·n[j] (nicotine intake × addiction stock). Splits base utility (consumption, addiction, expenditure, fixed effects) from TYA-dependent flavor terms for efficiency. |
+| `get_flow_utility(θ, N_J, N_A, N_Pcomb, A, q_cig, q_ecig, q_bundle, n, is_flavored, is_fda_flavored, cat_idx, E)` | Pre-computes flow utility for all (tya, alternative, addiction, price) states. Takes 13-element θ (excludes ψ). Returns 4D array U[tya_idx, j, a_idx, p_idx] of dimension 4 × N_J × N_A × N_Pcomb. TYA indicator: states 1,2 → tya=0; states 3,4 → tya=1. Flavor terms: λ₁,λ₂ apply to all flavored (is_flavored); λ₃,λ₄ are additional for FDA-authorized (is_fda_flavored). Splits base utility (consumption, addiction, expenditure, fixed effects) from TYA-dependent flavor terms for efficiency. |
 | `precompute_addiction_transitions(N_J, N_A, ψ, A, n)` | Pre-computes interpolation brackets (a_lower, a_upper) and weights (a_weight) for all (alternative, addiction state) pairs using binary search |
 | `get_initial_addiction_stock(ψ, A, n, y)` | Estimates initial addiction stock per household via fixed-point iteration: simulate forward from a₀, set a₀ to terminal value, repeat until convergence. Returns `(a0, max_iters)` where `max_iters` is the maximum iterations across all households. |
 | `simulate_addiction_trajectories(N_A, ψ, A, n, y, a0)` | Simulates addiction forward from estimated a₀ using observed choices. Returns `(a_state, a_continuous)` where `a_state` is the nearest grid index and `a_continuous` is the actual continuous addiction level for likelihood interpolation. |
@@ -246,8 +246,8 @@ Packages (CSV, DataFrames, Optim, Statistics, ForwardDiff) are installed if miss
 | Function | Purpose |
 |----------|---------|
 | `logsumexp(v)` | Numerically stable log-sum-exp: computes `log(Σ exp(v))` by factoring out the maximum to prevent overflow. Used to aggregate choice-specific values into the ex-ante value function (closed-form expected maximum from the Type I extreme value logit error assumption). |
-| `solve_vfi(N_J, N_A, N_P, N_Pcomb, β, δ, U, a_lower, a_upper, a_weight, p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w, Π_tya; ε, max_iter, V_init)` | **Naive** VFI with 4-state TYA transitions via Π_tya. Bellman uses δ only: V_choice = U + δ·EV. Continuation value integrates over TYA transitions: EV = Σ_{tya'} Π_tya[tya, tya'] · EV_price. After convergence, computes V_decision = (1-β)·U + β·V_choice = U + βδ·EV. When β=1, V_decision = V_choice. Aggregates via logsumexp. Returns `(V, V_decision, n_iter, converged)`. Not currently called by any code — retained for reference/comparison. |
-| `solve_vfi_sophisticated(...)` | **Sophisticated** VFI with 4-state TYA transitions. Same signature as `solve_vfi` (including Π_tya). Maintains two 4D arrays: V_d = U + βδ·EV (decision utility) and V_e = U + δ·EV (experienced utility). Continuation value integrates over TYA transitions via Π_tya. Aggregation: V = Σ_j softmax(V_d)_j · V_e_j + H(softmax(V_d)) where H is entropy. Post-convergence: V_decision = V_d (no transformation). When β=1, V_d = V_e and aggregation = logsumexp — numerically identical to naive. All estimation, MC, model validation, and counterfactual code calls this function. |
+| `solve_vfi(N_J, N_A, N_P, N_Pcomb, β, δ, U, a_lower, a_upper, a_weight, p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w, Π; V_init, ε, max_iter, verbose)` | **Naive** VFI with 4-state TYA transitions via Π. Accepts optional `V_init` for warm-starting (defaults to `nothing` → zeros). Uses `copyto!` for type-stable initialization. Bellman uses δ only: V_choice = U + δ·EV. Continuation value integrates over TYA transitions: EV = Σ_{tya'} Π[tya, tya'] · EV_price. After convergence, computes V_decision = (1-β)·U + β·V_choice = U + βδ·EV. When β=1, V_decision = V_choice. Aggregates via logsumexp. Returns `(V, V_decision, n_iter, converged)`. Not currently called by any code — retained for reference/comparison. |
+| `solve_vfi_sophisticated(...)` | **Sophisticated** VFI with 4-state TYA transitions. Same signature as `solve_vfi` (including Π and V_init). Accepts optional `V_init` for warm-starting (defaults to `nothing` → zeros). Uses `copyto!` for type-stable initialization. Maintains two 4D arrays: V_d = U + βδ·EV (decision utility) and V_e = U + δ·EV (experienced utility). Continuation value integrates over TYA transitions via Π. Aggregation: V = Σ_j softmax(V_d)_j · V_e_j + H(softmax(V_d)) where H is entropy. Post-convergence: V_decision = V_d (no transformation). When β=1, V_d = V_e and aggregation = logsumexp — numerically identical to naive. All estimation, MC, model validation, and counterfactual code calls this function. |
 
 **Log-Likelihood:**
 | Function | Purpose |
@@ -279,7 +279,7 @@ Packages (CSV, DataFrames, Optim, Statistics, ForwardDiff) are installed if miss
 **Objective Function:**
 | Variable / Function | Purpose |
 |----------|---------|
-| `objective(θ_vec)` | Objective function for the optimizer (13-element θ_vec). Increments `est_eval_count` and times each evaluation. **Box constraints:** returns `1e14` penalty if any parameter violates bounds via `check_parameter_bounds`. **ψ handling:** uses the global `ψ` (fixed from `get_fixed_parameters()`). For each candidate θ: (1) computes addiction grid from fixed ψ, (2) computes flow utility U from all 13 elements, (3) computes addiction transition brackets at fixed ψ, (4) solves VFI from scratch (no warm-start) with Π_tya for TYA state transitions. **Early-exit:** if VFI did not converge, logs a PENALTY message and returns `1e14`. Otherwise: (5) computes addiction trajectories at fixed ψ, (6) evaluates log-likelihood via trilinear interpolation, (7) logs eval number, LL, VFI iters, elapsed time, and θ vector via `est_log`. Returns the negative log-likelihood. Uses global data objects set in `02_Estimation.jl`. |
+| `objective(θ_vec)` | Objective function for the optimizer (13-element θ_vec, or more with ESTIMATE_PSI/ESTIMATE_BETA). Increments `est_eval_count` and times each evaluation. **Box constraints:** returns `1e14` penalty if any parameter violates bounds via `check_parameter_bounds`. **ψ handling:** when `ESTIMATE_PSI = false`, uses the global `ψ` (fixed at 0.68 from `get_fixed_parameters()`); when `ESTIMATE_PSI = true`, extracts ψ from θ_vec and recomputes the addiction grid, addiction transition brackets, initial addiction stocks, and addiction trajectories at the candidate ψ each evaluation. For each candidate θ: (1) computes addiction grid from ψ (fixed or extracted), (2) computes flow utility U from the 13 structural elements, (3) computes addiction transition brackets at ψ, (4) when `WARM_START = true`, detects phase changes via `(ra_outer_try, ra_inner_run)` and resets `V_warm_est` on change, then passes it as `V_init` to VFI; when `WARM_START = false`, passes `V_init = nothing` (cold start from zeros), (5) solves VFI with Π for TYA state transitions. **Early-exit:** if VFI did not converge, logs a PENALTY message and returns `1e14`. Otherwise: (6) stores converged V in `V_warm_est` if warm-starting, (7) computes addiction trajectories at ψ, (8) evaluates log-likelihood via trilinear interpolation, (9) logs eval number, LL, VFI iters, elapsed time, and θ vector. Returns the negative log-likelihood. Uses global data objects set in `02_Estimation.jl`. |
 
 **Alternative Ordering (j = 1, ..., 40):**
 | Index | Alternative |
@@ -295,46 +295,46 @@ Packages (CSV, DataFrames, Optim, Statistics, ForwardDiff) are installed if miss
 
 **Structural Parameters (θ) - 13 estimated parameters:**
 ```
-α_T   = cigarette consumption utility
+α_C   = cigarette consumption utility
 α_E   = e-cig consumption utility
-α_TE  = bundle consumption utility
-λ_1   = non-FDA flavor baseline effect
-λ_2   = non-FDA flavor × teen/young adult interaction
-λ_3   = FDA flavor baseline effect
-λ_4   = FDA flavor × teen/young adult interaction
+α_CE  = bundle consumption utility
+λ_1   = flavor baseline effect (all flavored products)
+λ_2   = flavor × teen/young adult interaction (all flavored products)
+λ_3   = FDA flavor baseline effect (additional for FDA-authorized)
+λ_4   = FDA flavor × teen/young adult interaction (additional for FDA-authorized)
 μ     = reinforcement effect (addiction × nicotine intake)
 γ     = addiction level effect (withdrawal cost)
 ω     = expenditure coefficient (price sensitivity)
-ξ_T   = cigarette fixed effect
+ξ_C   = cigarette fixed effect
 ξ_E   = e-cig fixed effect
-ξ_TE  = bundle fixed effect
+ξ_CE  = bundle fixed effect
 ```
 
 **Fixed Parameters (not estimated):**
 ```
-ψ     = fixed   (addiction decay rate, fixed from reduced-form AR(1) estimate)
+ψ     = 0.68   (addiction decay rate; estimated when ESTIMATE_PSI = true)
 β     = 1.0     (present bias; 1 = standard exponential discounting)
 δ     = 0.99    (monthly discount factor)
 ```
 
 **Flow Utility Specification:**
 ```
-u(j,a,p,tya) = α_T·c_cig[j] + α_E·c_ecig[j] + α_TE·c_cig[j]·c_ecig[j]
-             + μ·a·n[j] + γ·a
+u(j,a,p,tya) = α_C·q_cig[j] + α_E·q_ecig[j] + α_CE·q_cig[j]·q_ecig[j]
+             + γ·a + μ·a·n[j]
              + ω·E[p,j]
              + ξ_k
-             + 𝟙[non-FDA flav]·(λ_1 + λ_2·𝟙[tya])
+             + 𝟙[flavored]·(λ_1 + λ_2·𝟙[tya])
              + 𝟙[FDA flav]·(λ_3 + λ_4·𝟙[tya])
 ```
 Where:
-- c_cig[j], c_ecig[j] = cigarette and e-cigarette consumption for alternative j
+- q_cig[j], q_ecig[j] = cigarette and e-cigarette consumption for alternative j
 - n[j] = nicotine intake for alternative j (standardized)
 - a = addiction state
-- E[p,j] = expenditure (p_cig·c_cig[j] + p_ecig·c_ecig[j])
-- ξ_k = fixed effect (ξ_T for cig, ξ_E for ecig categories 2-4, ξ_TE for bundle categories 5-7)
+- E[p,j] = expenditure (p_cig·q_cig[j] + p_ecig·q_ecig[j])
+- ξ_k = fixed effect (ξ_C for cig, ξ_E for ecig categories 2-4, ξ_CE for bundle categories 5-7)
 - tya = teen/young adult indicator (TYA states 3,4 → tya=1; states 1,2 → tya=0)
-- non-FDA flav = non-FDA flavored ecig (cat=3) or bundle with non-FDA flavored ecig (cat=6)
-- FDA flav = FDA flavored ecig (cat=4) or bundle with FDA flavored ecig (cat=7)
+- flavored = any flavored ecig or bundle (cat ∈ {3, 4, 6, 7}); λ_1,λ_2 apply to all flavored
+- FDA flav = FDA flavored ecig (cat=4) or bundle with FDA flavored ecig (cat=7); λ_3,λ_4 are additional
 
 The reinforcement term μ·a·n[j] captures the interaction between addiction stock and current nicotine intake — higher addiction increases the marginal utility of nicotine-delivering alternatives. For the outside option (j = 1), n[j] = 0 so the reinforcement term is zero.
 
@@ -377,27 +377,63 @@ where H(p) = −Σ_j p_j·log(p_j) is the entropy from the T1EV shocks (the opti
 
 **Key economic difference:** The naive agent's continuation value is too optimistic — they think their future self will be a patient δ-discounter. The sophisticated agent correctly predicts their future self's present bias, so the continuation value is lower (future self's impatience destroys some value). Choice probabilities and the log-likelihood use V_decision in both cases.
 
-### Script 1b: `01_Functions_Beta.jl`
+### ESTIMATE_BETA Flag (replaces former `01_Functions_Beta.jl`)
 
-Beta estimation variant of `01_Functions.jl`. β (present bias) is estimated as the 14th structural parameter instead of being fixed at 1.0.
+The former `01_Functions_Beta.jl` has been **merged into `01_Functions.jl`** via the `ESTIMATE_BETA` flag. Set `ESTIMATE_BETA = true` in the calling script before `include("01_Functions.jl")` to estimate β (present bias) as the last structural parameter. When `ESTIMATE_BETA = false` (default), β is fixed at 1.0.
 
-**Key differences from `01_Functions.jl`:**
-| Area | `01_Functions.jl` (Base) | `01_Functions_Beta.jl` (Beta) |
-|------|--------------------------|-------------------------------|
-| Fixed parameters | `get_fixed_parameters()` → (ψ, β=1.0, δ) | `get_fixed_parameters()` → (ψ, δ) only |
-| β handling | Fixed at 1.0, not estimated | Estimated as 14th parameter (θ_vec[14]) |
-| TYA states | 4 states (1-4) via `get_tya_states()` | 4 states (1-4) via `get_tya_states()` (same) |
-| TYA transitions | 4×4 Π_tya via `get_tya_transitions()` | 4×4 Π_tya via `get_tya_transitions()` (same) |
-| `get_flow_utility()` | N_TYA = 4; 13-element θ | N_TYA = 4; 13-element θ (same) |
-| `solve_vfi()` / `solve_vfi_sophisticated()` | Takes Π_tya | Takes Π_tya (same) |
+**What ESTIMATE_BETA controls:**
+| Area | `ESTIMATE_BETA = false` (Base) | `ESTIMATE_BETA = true` (Beta) |
+|------|-------------------------------|-------------------------------|
+| `get_fixed_parameters()` | Returns (ψ=0.68, β=1.0, δ) | Returns (ψ=0.68, β=1.0, δ) — β ignored by optimizer |
+| β in objective | Uses global β from `get_fixed_parameters()` | Extracts β = θ_vec[end]; passes θ_vec[1:end-1] to `get_flow_utility()` |
 | Parameter bounds | 13 elements | 14 elements (β ∈ [0.01, 1.00]) |
-| `objective()` | 13-element θ_vec | 14-element θ_vec; β = θ_vec[14] |
+| Starting values | 13 parameters | 14 parameters (β = 0.90 appended) |
+| Output file naming | `Dynamic_Model_*` | `Dynamic_Model_Beta_*` |
 
-Both base and Beta files now use 4-state TYA with Π_tya transition matrix integration in VFI. The only structural difference is whether β is fixed (base) or estimated (Beta).
+### ESTIMATE_PSI Flag
 
-**VFI with TYA transitions:** The continuation value in `solve_vfi` and `solve_vfi_sophisticated` (both base and Beta) integrates over both price transitions (via Halton draws) and TYA state transitions (via Π_tya):
+Controls whether ψ (addiction decay rate) is estimated or fixed at 0.68. Set `ESTIMATE_PSI = true` in the calling script before `include("01_Functions.jl")`. When `true`, ψ is estimated as a structural parameter. When `false` (default), ψ is fixed at 0.68.
+
+**Parameter vector ordering:**
+- Base: `[13 structural]`
+- PSI only: `[13 structural, ψ]`
+- BETA only: `[13 structural, β]`
+- Both: `[13 structural, ψ, β]` (β always last when estimated)
+
+**What ESTIMATE_PSI controls:**
+| Area | `ESTIMATE_PSI = false` (Base) | `ESTIMATE_PSI = true` (Psi) |
+|------|-------------------------------|-------------------------------|
+| `get_fixed_parameters()` | Returns (ψ=0.68, β, δ) | Returns (ψ=0.68, β, δ) — ψ ignored by optimizer |
+| ψ in objective | Uses global ψ from `get_fixed_parameters()` | Extracts ψ from θ_vec; recomputes addiction transitions and trajectories |
+| Parameter bounds | 13 elements (or 14 with β) | +1 element (ψ ∈ [0.01, 1.00]) |
+| Starting values | 13 parameters (or 14 with β) | +1 parameter (ψ = 0.50 appended) |
+| Output file naming | `Psi_0.68` in tag | `Psi_Estimated` in tag |
+
+### WARM_START Flag
+
+Controls whether VFI reuses the previous evaluation's converged V as the initial guess within a Nelder-Mead run. Set `WARM_START = true` in the calling script before `include("01_Functions.jl")` to enable. Default is `false` (cold start from zeros each evaluation).
+
+**How it works:**
+- Within a single NM run (fixed outer try L and inner run M), θ changes only slightly between evaluations, so the previous V is nearly correct
+- V is reset to `nothing` (→ zeros) whenever `(ra_outer_try, ra_inner_run)` changes — i.e., at the start of each new outer try, inner run, or long convergence run
+- Only converged V is stored; unconverged V (penalty case) is not saved
+- Uses `copyto!` (not `copy`) inside VFI to guarantee Julia type stability — using `copy(V_init)` with a `Union{Array, Nothing}` type caused ~100x slowdown due to type instability in the VFI inner loop
+
+**Performance impact:** Reduces VFI from ~948 iterations (cold start) to ~7-50 iterations (warm start) for sequential evaluations within a NM run. First evaluation of each run still does ~948 iterations.
+
+**Correctness:** The contraction mapping has a unique fixed point regardless of starting V, so warm-start only affects iteration count, not the result. NLL at the same θ is identical with warm-start on vs off.
+
+**What WARM_START controls:**
+| Area | `WARM_START = false` (Cold) | `WARM_START = true` (Warm) |
+|------|---------------------------|---------------------------|
+| `objective()` | `V_init = nothing` (zeros each eval) | `V_init = V_warm_est` (previous converged V) |
+| `objective_mc()` | `V_init = nothing` (zeros each eval) | `V_init = V_warm` (previous converged V) |
+| Globals in `01_Functions.jl` | `V_warm_est`, `last_ra_phase_est` unused | Phase detection resets V on `(L, M)` change |
+| Globals in `01_MC_Simulation_Functions.jl` | `V_warm`, `last_ra_phase` unused | Phase detection resets V on `(L, M)` change |
+
+**VFI with TYA transitions:** The continuation value in `solve_vfi` and `solve_vfi_sophisticated` integrates over both price transitions (via Halton draws) and TYA state transitions (via Π):
 ```
-EV[tya, a', p'] = Σ_{tya'} Π_tya[tya, tya'] · Σ_r (1/R) · V[tya', a', p'_r]
+EV[tya, a', p'] = Σ_{tya'} Π[tya, tya'] · Σ_r (1/R) · V[tya', a', p'_r]
 ```
 This enables the model to distinguish present bias from exponential discounting: anticipated changes in TYA status (e.g., a child approaching age 13) affect continuation values differently under β < 1 vs β = 1.
 
@@ -411,19 +447,19 @@ Slurm batch script for running `02_Estimation.jl` on the University of Arizona H
 
 ### Script 2: `02_Estimation.jl`
 
-Main estimation script. Includes `01_Functions.jl`, loads all data, sets fixed parameters (ψ, β=1.0, δ=0.99 via `get_fixed_parameters()`), and runs the multi-start Nelder-Mead optimizer.
+Main estimation script. Sets `ESTIMATE_BETA` flag (default `false`) and `WARM_START` flag (default `true`), includes `01_Functions.jl`, loads all data, sets fixed parameters (ψ, β=1.0, δ=0.99 via `get_fixed_parameters()`), and runs the multi-start Nelder-Mead optimizer. When `ESTIMATE_BETA = true`, β is appended as the 14th parameter with starting value 0.90, and output files are prefixed with "Beta_".
 
 **Starting values:**
 - Static logit estimates from `03_Static_Logit.jl` provide starting values for shared parameters
 - Since static logit used unstandardized data, estimates must be **converted to standardized units**:
-  - `α_T_std = α_T_orig × c_cig_max`
-  - `α_E_std = α_E_orig × c_ecig_max`
-  - `α_TE_std = α_TE_orig × c_bundle_max`
+  - `α_C_std = α_C_orig × q_cig_max`
+  - `α_E_std = α_E_orig × q_ecig_max`
+  - `α_CE_std = α_CE_orig × q_bundle_max`
   - `ω_std = ω_orig × E_max`
-  - `λ_1, λ_2, λ_3, λ_4, ξ_T, ξ_E, ξ_TE`: no conversion (indicators/additive)
+  - `λ_1, λ_2, λ_3, λ_4, ξ_C, ξ_E, ξ_CE`: no conversion (indicators/additive)
 - μ and γ have no static counterpart; initialized at 0.10 and -0.10 (scaled for ã ∈ [0,1])
 - λ_3 and λ_4 (FDA flavor parameters) initialized from static logit estimates
-- ψ is fixed from reduced-form AR(1) estimate (not estimated)
+- ψ is fixed at 0.68 (overridden when ESTIMATE_PSI = true)
 
 **Estimation settings:**
 - Simplex deviations scaled to ~50-100% of starting parameter magnitudes; μ and γ get 100% deviation
@@ -431,13 +467,13 @@ Main estimation script. Includes `01_Functions.jl`, loads all data, sets fixed p
 
 **Rescaling estimates to original units:**
 After estimation, divide by max values to get interpretable units:
-- `α_T_orig = α_T_std / c_cig_max` → utils per pack
-- `α_E_orig = α_E_std / c_ecig_max` → utils per mL
-- `α_TE_orig = α_TE_std / c_bundle_max` → utils per (pack × mL)
+- `α_C_orig = α_C_std / q_cig_max` → utils per pack
+- `α_E_orig = α_E_std / q_ecig_max` → utils per mL
+- `α_CE_orig = α_CE_std / q_bundle_max` → utils per (pack × mL)
 - `ω_orig = ω_std / E_max` → utils per dollar
-- `μ_orig = μ_std × ψ / n_max²` → utils per (mg addiction × mg nicotine). μ multiplies ã and n_std, both standardized. ψ is fixed.
-- `γ_orig = γ_std × ψ / n_max` → utils per mg of addiction stock. γ multiplies only ã. ψ is fixed.
-- `λ_1, λ_2, λ_3, λ_4, ξ_T, ξ_E, ξ_TE`: no rescaling needed
+- `μ_orig = μ_std × ψ / n_max²` → utils per (mg addiction × mg nicotine). μ multiplies ã and n_std, both standardized. ψ is fixed at 0.68.
+- `γ_orig = γ_std × ψ / n_max` → utils per mg of addiction stock. γ multiplies only ã. ψ is fixed at 0.68.
+- `λ_1, λ_2, λ_3, λ_4, ξ_C, ξ_E, ξ_CE`: no rescaling needed
 
 **Output files** (written to `.../Dynamic_Model_Results/`):
 - `Dynamic_Model_Estimation_Log_<timestamp>.txt` — Full estimation progress: VFI convergence info, eval-by-eval LL and θ, optimizer restarts, timing
@@ -479,29 +515,24 @@ Uses `log_io` and `log_msg()` from `01_Functions.jl` (no separate MC logging).
 | Variable | Purpose |
 |----------|---------|
 | `eval_count` | Global MC evaluation counter. Reset before each replication. |
+| `V_warm`, `last_ra_phase` | Warm-start state for `objective_mc()`. `V_warm` stores the converged V from the previous VFI solve within a NM run. `last_ra_phase` tracks `(outer_try, inner_run)`; V resets when phase changes. Only active when `WARM_START = true`. |
 
 **Data Simulation:**
 | Function | Purpose |
 |----------|---------|
 | `simulate_data(V_decision_true, ψ, N_J, N_P, A, P, n, real_p_continuous, real_tya_state, real_hh_codes)` | Design-based MC simulation: conditions on real observables (prices, TYA, panel structure) and only simulates choices. Uses per-observation TYA state (varies by month within households). Two-pass approach: Pass 1 simulates from a₀=0, Pass 2 re-simulates from fixed-point corrected a₀. Returns `(y_sim, tya_state_sim, p_continuous_sim, hh_codes_sim)`. |
 
-**MC-Specific Addiction Functions:**
-| Function | Purpose |
-|----------|---------|
-| `get_initial_addiction_stock_mc(ψ, A, n, y, household_codes)` | Same as `get_initial_addiction_stock` but takes `household_codes` as a vector argument instead of reading CSV. For simulated data. |
-| `simulate_addiction_trajectories_mc(N_A, ψ, A, n, y, a0, household_codes)` | Same as `simulate_addiction_trajectories` but takes `household_codes` as a vector argument instead of reading CSV. For simulated data. |
-
 **MC Objective Function:**
 | Variable / Function | Purpose |
 |----------|---------|
 | `y_sim`, `tya_state_sim`, `p_continuous_sim`, `hh_codes_sim` | Global variables holding simulated data. Set by the MC loop in `02_MC_Simulation_Array.jl` before each replication's estimation. |
-| `objective_mc(θ_vec)` | MC-specific objective function (13-element θ_vec). Same as `objective()` but uses simulated data globals and MC-specific addiction functions. Uses the global `ψ` (fixed from `get_fixed_parameters()`), computes addiction grid and transitions at fixed ψ each eval. Passes Π_tya to `solve_vfi_sophisticated` for TYA state transitions. Increments `eval_count` and times each evaluation. **Box constraints:** returns `1e14` penalty via `check_parameter_bounds` (matching `objective()`). **Early-exit:** if VFI did not converge, logs a PENALTY message and returns `1e14`. Logs eval number, LL, VFI iters, elapsed time, and θ vector. |
+| `objective_mc(θ_vec)` | MC-specific objective function (13-element θ_vec, or more with ESTIMATE_PSI/ESTIMATE_BETA). Same as `objective()` but uses simulated data globals and the base addiction functions (`get_initial_addiction_stock`, `simulate_addiction_trajectories`) from `01_Functions.jl`. When `ESTIMATE_PSI = false`, uses the global `ψ` (fixed at 0.68 from `get_fixed_parameters()`); when `ESTIMATE_PSI = true`, extracts ψ from θ_vec and recomputes addiction grid, transitions, and trajectories at the candidate ψ each eval. When `WARM_START = true`, detects phase changes via `(ra_outer_try, ra_inner_run)` and resets `V_warm` on change, then passes it as `V_init` to VFI; stores converged V after successful solve. Passes Π to `solve_vfi_sophisticated` for TYA state transitions. Increments `eval_count` and times each evaluation. **Box constraints:** returns `1e14` penalty via `check_parameter_bounds` (matching `objective()`). **Early-exit:** if VFI did not converge, logs a PENALTY message and returns `1e14`. Logs eval number, LL, VFI iters, elapsed time, and θ vector. |
 
 ### Script 2: `05_MC_Simulation/02_MC_Simulation_Array.jl`
 
-Parallel version of the MC simulation using Slurm job arrays. Each array task runs a **single replication**, reading its replication number `s` from `SLURM_ARRAY_TASK_ID` (or command-line argument for local testing). Seeds RNG with `Random.seed!(s)` for reproducibility. Loads ψ from `get_fixed_parameters()`. θ_true (13 parameters) is computed at runtime from static logit estimates converted to standardized units (α_T = α_T_orig × c_cig_max, etc.) with λ_1=0.852, λ_2=0.703, λ_3=0.5, λ_4=0.5, ξ_T=-3.573, ξ_E=-6.500, ξ_TE=-5.288, μ=0.10, γ=-0.10 (scaled for ã ∈ [0,1]). DGP section uses fixed ψ from `get_fixed_parameters()` to create the addiction grid and solve the true VFI with Π_tya.
+Parallel version of the MC simulation using Slurm job arrays. Each array task runs a **single replication**, reading its replication number `s` from `SLURM_ARRAY_TASK_ID` (or command-line argument for local testing). Seeds RNG with `Random.seed!(s)` for reproducibility. Sets `WARM_START = true` (warm-start VFI within NM runs). Loads ψ from `get_fixed_parameters()`. θ_true (13 parameters) is computed at runtime from static logit estimates converted to standardized units (α_C = α_C_orig × q_cig_max, etc.) with λ_1=0.1554, λ_2=0.6616, λ_3=-0.0975, λ_4=-0.3359, ξ_C=-3.2001, ξ_E=-6.0294, ξ_CE=-5.2096, μ=0.05, γ=-0.10 (scaled for ã ∈ [0,1]). DGP section uses fixed ψ from `get_fixed_parameters()` to create the addiction grid and solve the true VFI with Π. True parameters and log output are rounded to 4 decimal places.
 
-**Starting Values:** Deliberately offset from truth (α_T=0.5, α_E=0.3, α_TE=0.1, λ_1=0.4, λ_2=0.3, λ_3=0.3, λ_4=0.2, μ=0.1, γ=-0.1, ω=-1.0, ξ_T=-2.0, ξ_E=-4.0, ξ_TE=-3.0) with simplex deviations ~50% of absolute value; μ and γ get 100% deviation.
+**Starting Values:** Set to 50% of θ_true (`starting_param = map(x -> 0.5x, θ_true)`) with simplex deviations ~50% of absolute value; γ and μ get 100% deviation.
 
 **Usage:**
 - HPC: `sbatch 02_MC_Simulation_Array_Slurm.sb` (launches 100 independent tasks)
@@ -511,7 +542,7 @@ Parallel version of the MC simulation using Slurm job arrays. Each array task ru
 - `<ss>_MC_Rep_Results_<timestamp>.csv`: Single-row CSV result with NLL and estimated parameters
 - `<ss>_MC_Rep_Log_<timestamp>.txt`: Full log for this replication
 - `<ss>_MC_Rep_Parameters_<timestamp>.csv`: CSV parameter trace for this replication
-- `MC_True_Parameters.csv`: True parameter values (overwritten by each rep, but identical)
+- `MC_True_Parameters.csv`: True parameter values in transposed format (parameter names as columns, single row of values rounded to 4 decimal places). Overwritten by each rep, but identical.
 
 ### Script 3: `05_MC_Simulation/03_MC_Aggregate_Results.jl`
 
@@ -523,104 +554,29 @@ Aggregates per-replication MC results from job array. Reads all `*_MC_Rep_Result
 
 ### Script 4: `05_MC_Simulation/04_Two_Param_Profile.jl`
 
-Diagnostic tool for visualizing the likelihood surface. Evaluates NLL over a 2D grid of two parameters while holding all others at truth. Default profiles (α_T, γ) to diagnose the ridge between consumption utility and withdrawal cost. Change `param_idx_1` and `param_idx_2` to profile other pairs. ψ is fixed from `get_fixed_parameters()`. Grid evaluation uses fixed ψ for the addiction grid.
+Diagnostic tool for visualizing the likelihood surface. Evaluates NLL over a 2D grid of two parameters while holding all others at truth. Default profiles (α_C, γ) to diagnose the ridge between consumption utility and withdrawal cost. Change `param_idx_1` and `param_idx_2` to profile other pairs. ψ is fixed at 0.68 from `get_fixed_parameters()`. Grid evaluation uses fixed ψ for the addiction grid.
 
 **Output files** (written to `.../MC_Simulation_Results/`):
 - `Profile_<name1>_<name2>.csv`: Long-format grid (param1, param2, NLL) for plotting
 
-## MC Simulation Beta (`05_MC_Simulation_Beta/`)
+## MC Simulation Beta / Psi Variants
 
-Monte Carlo parameter recovery for the Beta estimation variant. Same design-based MC approach as `05_MC_Simulation/` but estimates 14 parameters (13 structural + β) and uses the 4-state TYA classification with transition matrix Π_tya.
+The `05_MC_Simulation_Beta/` directory has been deleted. MC simulation with `ESTIMATE_BETA = true` and/or `ESTIMATE_PSI = true` is now handled entirely by the flags in `05_MC_Simulation/02_MC_Simulation_Array.jl`. Set the desired flags at the top of the script before running.
 
-### MC Functions: `05_MC_Simulation_Beta/01_MC_Simulation_Functions_Beta.jl`
+**To run MC with ESTIMATE_BETA and/or ESTIMATE_PSI:** Set the flags at the top of `05_MC_Simulation/02_MC_Simulation_Array.jl`, then:
+- HPC: `sbatch 05_MC_Simulation/02_MC_Simulation_Array_Slurm.sb`
+- Local: `julia 05_MC_Simulation/02_MC_Simulation_Array.jl 1`
 
-Contains functions specific to the Monte Carlo simulation with β estimation. Same structure as `01_MC_Simulation_Functions.jl` but adapted for the Beta variant.
-
-**Changes from `01_MC_Simulation_Functions.jl`:**
-- `objective_mc()` takes 14-element θ_vec (13 structural + β as 14th)
-- Extracts β = θ_vec[14], passes θ_vec[1:13] to `get_flow_utility`
-- Passes β and global Π_tya to `solve_vfi_sophisticated`
-
-**Logging:**
-
-Uses `log_io` and `log_msg()` from `01_Functions_Beta.jl` (included before this file).
-
-| Variable | Purpose |
-|----------|---------|
-| `eval_count` | Global MC evaluation counter. Reset before each replication. |
-| `param_trace_io` | Global file handle for parameter trace (set by `02_MC_Simulation_Array_Beta.jl`). |
-| `current_replication` | Global replication number (updated by MC loop). |
-
-**Data Simulation:**
-| Function | Purpose |
-|----------|---------|
-| `simulate_data(V_decision_true, ψ, N_J, N_P, A, P, n, real_p_continuous, real_tya_state, real_hh_codes)` | Design-based MC simulation: conditions on real observables (prices, TYA, panel structure) and only simulates choices. Uses per-observation TYA state (varies by month within households). Two-pass approach: Pass 1 simulates from a₀=0, Pass 2 re-simulates from fixed-point corrected a₀. Returns `(y_sim, tya_state_sim, p_continuous_sim, hh_codes_sim)`. |
-
-**MC-Specific Addiction Functions:**
-| Function | Purpose |
-|----------|---------|
-| `get_initial_addiction_stock_mc(ψ, A, n, y, hh_codes)` | Same as `get_initial_addiction_stock` but takes `household_codes` as a vector argument instead of reading CSV. For simulated data. |
-| `simulate_addiction_trajectories_mc(N_A, ψ, A, n, y, a0, hh_codes)` | Same as `simulate_addiction_trajectories` but takes `household_codes` as a vector argument instead of reading CSV. For simulated data. |
-
-**MC Helper Functions:**
-| Function | Purpose |
-|----------|---------|
-| `should_print_eval(eval_num)` | Returns true for evals 1-10 and every 50th eval. Controls verbose logging. |
-| `write_param_trace(eval_num, nll, vfi_iters, θ_vec)` | Writes a single row to the parameter trace file: sim, outer_try, inner_run, eval, NLL, VFI_iters, θ values. |
-
-**MC Objective Function:**
-| Function | Purpose |
-|----------|---------|
-| `objective_mc(θ_vec)` | MC-specific objective function (14-element θ_vec). Same as `objective()` in `01_Functions_Beta.jl` but uses simulated data globals and MC-specific addiction functions. Extracts β = θ_vec[14], passes θ_vec[1:13] to `get_flow_utility`. Passes β and global Π_tya to `solve_vfi_sophisticated`. Uses global ψ (fixed). Box constraints: returns `1e14` penalty via `check_parameter_bounds`. Writes every eval to trace file; only prints verbose log at eval 1-10 and every 50th. |
-
-### Script 2: `05_MC_Simulation_Beta/02_MC_Simulation_Array_Beta.jl`
-
-Parallel version of the MC simulation using Slurm job arrays with β estimation. Each array task runs a **single replication**, reading its replication number `s` from `SLURM_ARRAY_TASK_ID` (or command-line argument for local testing). Seeds RNG with `Random.seed!(s)` for reproducibility.
-
-**Includes:** `01_Functions_Beta.jl` and `01_MC_Simulation_Functions_Beta.jl`
-
-**Changes from `02_MC_Simulation_Array.jl`:**
-- Includes `01_Functions_Beta.jl` (4-state TYA, β estimated) instead of `01_Functions.jl`
-- `get_fixed_parameters()` returns `(ψ, δ)` only (no β)
-- Loads 4-state TYA via `get_tya_states()` (same as base MC)
-- Loads Π_tya via `get_tya_transitions()` (same as base MC)
+**When ESTIMATE_BETA = true:**
 - θ_true has 14 parameters (β = 0.95 as present-bias DGP)
 - starting_param has 14 parameters (β = 0.90 as offset starting value)
-- Passes Π_tya to `solve_vfi_sophisticated` in the DGP section
+- `objective_mc()` extracts β from θ_vec[end], passes θ_vec[1:end-1] to `get_flow_utility()`
 
-**True DGP Parameters:**
-```
-θ_true = (α_T, α_E, α_TE, λ_1=0.852, λ_2=0.703, λ_3=0.5, λ_4=0.5,
-          μ=0.10, γ=-0.10, ω, ξ_T=-3.573, ξ_E=-6.500, ξ_TE=-5.288,
-          β=0.95)
-```
-Where α_T, α_E, α_TE, ω are computed at runtime from static logit estimates converted to standardized units (same as base MC). ψ is fixed from `get_fixed_parameters()`. β = 0.95 is the true present-bias parameter to be recovered.
+**When ESTIMATE_PSI = true:**
+- θ_true includes ψ as a parameter
+- `objective_mc()` extracts ψ from θ_vec; recomputes addiction transitions and trajectories
 
-**Starting Values:** Deliberately offset from truth (α_T=0.5, α_E=0.3, α_TE=0.1, λ_1=0.4, λ_2=0.3, λ_3=0.3, λ_4=0.2, μ=0.1, γ=-0.1, ω=-1.0, ξ_T=-2.0, ξ_E=-4.0, ξ_TE=-3.0, β=0.90) with simplex deviations ~50% of absolute value; μ and γ get 100% deviation; β gets 0.10 deviation.
-
-**MC Settings:**
-- L=2 outer tries, M=2 inner tries, inner_iter=100
-- Design-based: conditions on real observables (prices, TYA states, panel structure), only simulates choices
-
-**Usage:**
-- HPC: `sbatch 02_MC_Simulation_Array_Beta_Slurm.sb` (launches replications as job array)
-- Local: `julia 02_MC_Simulation_Array_Beta.jl 1` (runs replication 1)
-
-**Output files** (one set per replication, written to `.../MC_Simulation_Beta_Results/`):
-- `<ss>_MC_Rep_Results_<timestamp>.csv`: Single-row CSV result with NLL and estimated parameters
-- `<ss>_MC_Rep_Log_<timestamp>.txt`: Full log for this replication
-- `<ss>_MC_Rep_Parameters_<timestamp>.csv`: CSV parameter trace for this replication
-- `MC_True_Parameters.csv`: True parameter values (overwritten by each rep, but identical)
-
-### Script 2b: `05_MC_Simulation_Beta/02_MC_Simulation_Array_Beta_Slurm.sb`
-
-Slurm batch script for running the Beta MC simulation as a job array.
-
-**Resources:** 1 node, 1 task, 32 CPUs (for VFI threading), 5 GB per CPU (160 GB total), 24 hour time limit, standard partition.
-
-**Array:** `--array=1-2` (currently set to 2 replications; increase for full MC study, e.g., `--array=1-100`).
-
-**Output:** Slurm logs written to `.../MC_Simulation_Results/MC_Array_Beta_<array_id>_Slurm_Log_<job_id>.out`.
+Output directories are named using `<psi_tag>_<beta_tag>` conventions (see Output Directory Naming below).
 
 ## Static Logit (`../Structural_Model_Motivation/03_Static_Logit.jl`)
 
@@ -636,28 +592,28 @@ Static conditional logit model motivating the dynamic model. Drops the dynamic a
 **Pre-computed Matrices:**
 | Matrix | Dimension | Description |
 |--------|-----------|-------------|
-| `E_obs[i, j]` | N_obs × N_J | Current expenditure: `p_cig[i] · c_cig[j] + p_ecig[i] · c_ecig[j]` |
+| `E_obs[i, j]` | N_obs × N_J | Current expenditure: `p_cig[i] · q_cig[j] + p_ecig[i] · q_ecig[j]` |
 | `lag_match[i, j]` | N_obs × N_J | 1 if alternative j's category matches the household's lagged category choice |
 
 **Structural Parameters (θ) — 12 parameters:**
 ```
-α_T   = cigarette consumption utility (per pack)
+α_C   = cigarette consumption utility (per pack)
 α_E   = e-cig consumption utility (per mL)
-α_TE  = bundle interaction utility (per pack·mL)
-λ_1   = non-FDA flavor baseline effect
-λ_2   = non-FDA flavor × teen/young adult interaction
-λ_3   = FDA flavor baseline effect
-λ_4   = FDA flavor × teen/young adult interaction
+α_CE  = bundle interaction utility (per pack·mL)
+λ_1   = flavor baseline effect (all flavored products)
+λ_2   = flavor × teen/young adult interaction (all flavored products)
+λ_3   = FDA flavor baseline effect (additional for FDA-authorized)
+λ_4   = FDA flavor × teen/young adult interaction (additional for FDA-authorized)
 ρ     = state dependence (lagged category match)
 ω     = expenditure coefficient (price sensitivity)
-ξ_T   = cigarette fixed effect
+ξ_C   = cigarette fixed effect
 ξ_E   = e-cig fixed effect
-ξ_TE  = bundle fixed effect
+ξ_CE  = bundle fixed effect
 ```
 
 **Negative Log-Likelihood:**
 
-`neg_log_likelihood(θ_vec, N_obs, N_J, tya, y, c_cig, c_ecig, c_bundle, is_non_fda_flavored, is_fda_flavored, lag_match, E_obs, fe_T, fe_E, fe_TE)` — Takes data arrays as arguments for type stability with ForwardDiff. A single-argument wrapper `nll = θ -> neg_log_likelihood(θ, ...)` is used by the optimizer and Hessian computation.
+`neg_log_likelihood(θ_vec, N_obs, N_J, tya, y, q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, lag_match, E_obs, fe_C, fe_E, fe_CE)` — Takes data arrays as arguments for type stability with ForwardDiff. A single-argument wrapper `nll = θ -> neg_log_likelihood(θ, ...)` is used by the optimizer and Hessian computation.
 
 **Estimation (three optimizers for comparison):**
 1. **L-BFGS with autodiff** — `optimize(nll, ...; autodiff = :forward)` with ForwardDiff. JIT warmup call before timed optimization. Callback logs every 10 iterations. Converges in ~94 iterations, ~36s.
@@ -689,36 +645,35 @@ Static nested logit model that relaxes IIA as a **robustness check** for the fla
 
 **Decision:** σ̂ = 0.12 is too small to warrant modifying the dynamic model (VFI, likelihood, counterfactual, MC code). The static nested logit is reported as evidence that IIA is approximately satisfied.
 
-**Output** (written to `.../Static_Nested_Logit_Results/`):
+**Output** (written to `.../Static_Logit_Results/`):
 - `Static_Nested_Logit_Estimation_Log_<timestamp>.txt`
 
 ## Reduced-Form AR(1) Estimation of ψ (`../Structural_Model_Motivation/05_Reduced_Form_Psi.R`)
 
 Estimates the addiction decay rate ψ from the reduced-form persistence of nicotine consumption via AR(1) regression. Written in R using data.table and fixest. Reads the same processed CSVs from `.../Dynamic_Model/Data/` used by the structural model.
 
-**Main specification (Mundlak/CRE):**
+**Main specification (household FE + Nickell correction):**
 ```
-n_it = α + ρ · n_{i,t-1} + β_1 · p_cig_it + β_2 · p_ecig_it
-     + β_3 · mean_cig_i + β_4 · mean_ecig_i + ε_it
+nicotine ~ lag_nicotine | household_code + purchase_month
 ```
-Estimated via OLS with `fixest::feols`, clustered SEs at household level. **ψ̂ = 1 - ρ̂**, SE(ψ̂) = SE(ρ̂) by delta method.
+Estimated via `fixest::feols` with household and month fixed effects, clustered SEs at household level. The raw FE estimate ρ̂_FE is biased downward by Nickell bias in short panels, so a Nickell correction is applied: `ρ_corrected = (ρ_FE × (T_bar - 1) + 1) / (T_bar - 2)` where T_bar is the average number of time periods per household. **ψ̂ = 1 - ρ̂_corrected**.
 
 **Models estimated:**
-1. Mundlak CRE (main specification)
+1. Mundlak CRE
 2. Mundlak CRE + month fixed effects
 3. Separate cig and ecig AR(1)s (product-specific persistence)
-4. Household FE (Nickell-biased comparison)
+4. Household FE + month FE with Nickell bias correction (main specification)
 
-**Key results:** ρ̂ ≈ 0.52 (Mundlak), implying ψ̂ ≈ 0.48. Household FE gives ρ̂ ≈ 0.25 (biased downward by Nickell bias in short panels), which would overestimate ψ.
+**Key results:** ρ̂_corrected ≈ 0.3216 (household FE + Nickell correction), implying ψ̂ ≈ 0.6884. The Mundlak/CRE specification gives ρ̂ ≈ 0.52 (ψ̂ ≈ 0.48), but the household FE + Nickell correction is preferred because it directly controls for time-invariant unobserved heterogeneity.
 
-**Why Mundlak over household FE:** With a lagged dependent variable + household FE, demeaning creates mechanical negative correlation between the demeaned lag and demeaned error (Nickell, 1981), biasing ρ̂ downward (and ψ̂ upward). The Mundlak/CRE approach (household means of time-varying regressors as controls) avoids this by not demeaning.
+**Why household FE + Nickell correction:** With a lagged dependent variable + household FE, demeaning creates mechanical negative correlation between the demeaned lag and demeaned error (Nickell, 1981), biasing ρ̂ downward. The Nickell correction formula adjusts for this bias analytically, recovering a consistent estimate of ρ. This approach is preferred over Mundlak/CRE because it directly absorbs all time-invariant household heterogeneity via fixed effects rather than relying on household means as proxies.
 
 ## Data Standardization
 
 **All continuous variables entering the utility function are STANDARDIZED by dividing by their maximum value.**
 
 This is done automatically in the data-loading functions:
-- `get_consumption()` → returns standardized c_cig, c_ecig and their raw max values
+- `get_consumption()` → returns standardized q_cig, q_ecig and their raw max values
 - `get_nicotine()` → returns standardized n and raw n_max
 - `get_addiction_space(ψ)` → normalized addiction grid A ∈ [0, 1] (ã = a·ψ, steady state ã = n ∈ [0, 1])
 - `get_expenditures()` → computes E from raw consumption, then standardizes; returns E_max
@@ -726,8 +681,8 @@ This is done automatically in the data-loading functions:
 **Standardization factors** (logged during estimation, needed to rescale parameter estimates):
 | Variable | Raw Range | Standardized Range | Max Value |
 |----------|-----------|-------------------|-----------|
-| c_cig | 0-60 packs | [0, 1] | c_cig_max |
-| c_ecig | 0-51 mL | [0, 1] | c_ecig_max |
+| q_cig | 0-60 packs | [0, 1] | q_cig_max |
+| q_ecig | 0-51 mL | [0, 1] | q_ecig_max |
 | n | 0-1500 mg | [0, 1] | n_max |
 | a | 0-1596 | [0, 1] | (normalized: ã = a·ψ) |
 | E | 0-605 $ | [0, 1] | E_max |
@@ -745,16 +700,16 @@ After estimation, divide coefficients by the corresponding max values to get ori
 
 | Parameter | Rescaling Formula | Original Units |
 |-----------|-------------------|----------------|
-| α_T | α_T_orig = α_T_std / c_cig_max | utils per pack |
-| α_E | α_E_orig = α_E_std / c_ecig_max | utils per mL |
-| α_TE | α_TE_orig = α_TE_std / c_bundle_max | utils per (pack × mL) |
+| α_C | α_C_orig = α_C_std / q_cig_max | utils per pack |
+| α_E | α_E_orig = α_E_std / q_ecig_max | utils per mL |
+| α_CE | α_CE_orig = α_CE_std / q_bundle_max | utils per (pack × mL) |
 | ω | ω_orig = ω_std / E_max | utils per dollar |
-| μ | μ_orig = μ_std × ψ / n_max² | utils per (mg addiction × mg nicotine). Reinforcement term μ·ã·n_std[j] involves two standardized variables: ã = ψ·a_raw/n_max and n_std = n_raw/n_max, giving n_max² in denominator. ψ is fixed. |
-| γ | γ_orig = γ_std × ψ / n_max | utils per mg of addiction stock. Withdrawal term γ·ã involves one standardized variable: ã = ψ·a_raw/n_max, giving n_max in denominator. ψ is fixed. |
+| μ | μ_orig = μ_std × ψ / n_max² | utils per (mg addiction × mg nicotine). Reinforcement term μ·ã·n_std[j] involves two standardized variables: ã = ψ·a_raw/n_max and n_std = n_raw/n_max, giving n_max² in denominator. ψ is fixed at 0.68. |
+| γ | γ_orig = γ_std × ψ / n_max | utils per mg of addiction stock. Withdrawal term γ·ã involves one standardized variable: ã = ψ·a_raw/n_max, giving n_max in denominator. ψ is fixed at 0.68. |
 | λ_1, λ_2, λ_3, λ_4 | No rescaling | utils (indicator) |
-| ξ_T, ξ_E, ξ_TE | No rescaling | utils (additive) |
+| ξ_C, ξ_E, ξ_CE | No rescaling | utils (additive) |
 
-Note: The addiction grid is normalized to [0, 1] via ã = ψ·a_raw/n_max. The reinforcement term μ·ã·n_std involves two standardized variables (ã and n_std = n_raw/n_max), so μ_orig = μ_std × ψ / n_max². The withdrawal term γ·ã involves only ã, so γ_orig = γ_std × ψ / n_max. ψ is fixed from the reduced-form AR(1) estimate and requires no rescaling.
+Note: The addiction grid is normalized to [0, 1] via ã = ψ·a_raw/n_max. The reinforcement term μ·ã·n_std involves two standardized variables (ã and n_std = n_raw/n_max), so μ_orig = μ_std × ψ / n_max². The withdrawal term γ·ã involves only ã, so γ_orig = γ_std × ψ / n_max. ψ is fixed at 0.68; overridden when ESTIMATE_PSI = true.
 
 **VFI normalization:**
 Currently disabled (commented out). When enabled, the solve_vfi function normalizes the value function each iteration by subtracting a reference value to prevent unbounded growth and preserve numerical precision for small effects (TYA, price).
@@ -769,17 +724,17 @@ Currently disabled (commented out). When enabled, the solve_vfi function normali
 - **Integration**: Halton sequences (quasi-Monte Carlo) with 200 draws for smooth approximation
 
 **Second Stage (Julia):**
-- **Addiction dynamics**: ã' = (1-ψ)ã + ψ·n in normalized units (ã = a·ψ ∈ [0, 1]) with ψ fixed from reduced-form AR(1) estimate (`05_Reduced_Form_Psi.R`). Normalization keeps addiction on the same [0, 1] scale as consumption, nicotine, and expenditure.
+- **Addiction dynamics**: ã' = (1-ψ)ã + ψ·n in normalized units (ã = a·ψ ∈ [0, 1]) with ψ fixed at 0.68 (overridden when ESTIMATE_PSI = true). Normalization keeps addiction on the same [0, 1] scale as consumption, nicotine, and expenditure.
 - **Initial conditions**: Household-specific ã₀ estimated via fixed-point iteration on the terminal value mapping; convergence guaranteed by Banach fixed-point theorem (contraction rate (1-ψ)^T)
 - **Discounting**: β-δ quasi-hyperbolic discounting. δ=0.99 (monthly exponential). β=1.0 in baseline (standard exponential, β<1 is present-biased). Uses sophisticated agent VFI (`solve_vfi_sophisticated`): maintains decision utility V_d = U + βδ·EV and experienced utility V_e = U + δ·EV, aggregates via softmax(V_d)-weighted V_e + entropy. When β=1, reduces to standard logsumexp (identical to naive). The naive `solve_vfi` is retained but not called.
 - **State space discretization**: 20 addiction states × 100 price states × 4 TYA states (both base and Beta)
 - **VFI convergence**: Sup-norm tolerance ε=1e-4
 - **Interpolation**: Linear interpolation over addiction grid; bilinear interpolation over 2D price grid (cig × ecig) for continuation values. Out-of-grid predicted prices clamped to grid bounds.
-- **Flavor effects**: Non-FDA flavor (λ_1 baseline, λ_2 × TYA) and FDA flavor (λ_3 baseline, λ_4 × TYA) effects estimated separately
+- **Flavor effects**: λ_1 (baseline) and λ_2 (× TYA) apply to all flavored products; λ_3 (baseline) and λ_4 (× TYA) are additional effects for FDA-authorized flavored products
 - **Parallelization**: VFI parallelizes over price states via `Threads.@threads`
 - **Optimization**: Multi-start Nelder-Mead (`random_amoeba`) with random restarts, minimizing the negative log-likelihood
 - **Standard errors**: Finite differences on the full objective (each perturbation re-solves VFI)
-- **VFI warm-start**: Disabled (each evaluation starts fresh) to prevent false 1-iteration convergence
+- **VFI warm-start**: Controlled by `WARM_START` flag. When enabled (`true`), reuses the previous evaluation's converged V as the initial guess within a NM run, reducing iterations from ~948 to ~7-50. V is reset to zeros at each new outer try (L), inner run (M), and long run. Uses `copyto!` (not `copy`) for type-stable initialization. When disabled (`false`), each evaluation starts fresh from zeros.
 
 ## Recent Changes (February 2026)
 
@@ -800,37 +755,33 @@ The product choice structure has been updated to 40 alternatives:
 - `get_nicotine()`: Handles 4 bundles with nicotine suffix columns
 - `get_category_index()`: Assigns cat=4 to 2 orig bundles, cat=5 to 2 flav bundles
 - `map_prices_to_grid()`: Uses 12 cig bin column names (`cig_1_p`, `cig_2_p`, etc.)
-- `objective()`: Disabled warm-start (V_init = nothing)
 
-**`04_MC_Simulation/01_MC_Simulation_Functions.jl`:**
-- `objective_mc()`: Disabled warm-start to match main estimation
+### VFI Warm-Start Re-enabled via WARM_START Flag
+VFI warm-starting was previously disabled entirely after a bug where VFI converged in 1 iteration (the warm-start was never reset between optimizer phases). This has been re-implemented correctly with the `WARM_START` flag:
 
-### VFI Warm-Start Issue
-Around eval 2800, VFI was converging in only 1 iteration due to warm-start from previous θ. This was fixed by disabling warm-start entirely (setting `V_Init = nothing`) so each evaluation starts fresh from zeros.
+**Mechanism:** V is reset to `nothing` (→ zeros) whenever `(ra_outer_try, ra_inner_run)` changes — i.e., at each new outer try (L), inner run (M), or long convergence run. Within a single NM run, θ barely changes between evaluations, so the previous V is nearly correct and VFI converges in ~7-50 iterations instead of ~948.
+
+**Type stability fix:** Initial implementation used `copy(V_init)` with `V_init::Union{Array{Float64,3}, Nothing}`, which caused Julia type instability — the compiler failed to narrow the Union type through the conditional branch, making every `V_now` access in the VFI inner loop use dynamic dispatch (~100x slowdown). Fixed by always allocating `V_now = zeros(...)` first, then using `copyto!(V_now, V_init)` in-place if warm-starting.
+
+**Files updated:**
+- `01_Functions.jl`: Added `WARM_START` flag default (`false`); added `V_warm_est`/`last_ra_phase_est` globals; added `V_init` keyword to both `solve_vfi` and `solve_vfi_sophisticated`; added warm-start phase detection and V storage in `objective()`; `random_amoeba` starting params logged with `@sprintf("%.4f")`
+- `01_MC_Simulation_Functions.jl`: Added `V_warm`/`last_ra_phase` globals; added warm-start phase detection, `V_init` pass-through, and V storage in `objective_mc()`
+- `02_Estimation.jl`: Sets `WARM_START = true`
+- `02_MC_Simulation_Array.jl`: Sets `WARM_START = true`
+
+### MC True Parameters Updated
+Updated θ_true in `02_MC_Simulation_Array.jl`: λ_1=0.1554, λ_2=0.6616, λ_3=-0.0975, λ_4=-0.3359, ξ_C=-3.2001 (was -2.007), ξ_E=-6.0294, ξ_CE=-5.2096, μ=0.05 (was 0.10). Starting values changed from fixed offsets to 50% of θ_true (`starting_param = map(x -> 0.5x, θ_true)`). True parameters CSV now transposed (parameter names as columns) with values rounded to 4 decimal places. All log output for true/starting parameters rounded to 4 decimal places via `@sprintf("%.4f")`.
 
 ### Reinforcement Term: μ·a·n[j] (considered but not changed)
 Considered changing the reinforcement term from `μ·a·n[j]` to `μ·a·𝟙[j ≠ outside]` to break collinearity between n[j] and c[j]. The current code still uses `μ·a·n[j]` (nicotine intake × addiction stock). The MC simulation with ψ=0.50 improved identification sufficiently without this change.
 
-### ψ Fixed from Reduced-Form AR(1) Estimate
-Addiction decay rate ψ was briefly estimated jointly as the 12th parameter, but MC simulations revealed a ψ-μ identification ridge: the optimizer finds high ψ (~0.875) + negligible μ (~0) instead of the true ψ=0.5 + μ=0.1. To break this, ψ is now fixed from a reduced-form AR(1) regression on nicotine consumption persistence (`05_Reduced_Form_Psi.R`). Both `objective()` and `objective_mc()` use the global `ψ` from `get_fixed_parameters()`.
-
-**Files updated:**
-- `01_Functions.jl`: `get_fixed_parameters()` returns ψ (fixed); bounds vectors (13 elements); `objective()` uses global ψ, takes 13-element θ_vec
-- `01_MC_Simulation_Functions.jl`: `objective_mc()` uses global ψ, takes 13-element θ_vec
-- `02_Estimation.jl`: loads `ψ, β, δ = get_fixed_parameters()`; starting_param 13 elements (no ψ); add vector 13 elements
-- `02_MC_Simulation_Array.jl`: loads ψ from `get_fixed_parameters()`; θ_true 13 params (no ψ); starting_param 13 elements; uses fixed ψ for DGP
-- `03_Standard_Errors.jl`: loads `ψ, _, _ = get_fixed_parameters()`; uses fixed ψ for addiction grid; 13 parameters
-
-### MC Identification Finding
-MC simulations revealed that ψ=0.94 (rapid addiction decay, only 6% persists) compresses addiction stock variation so severely that μ, γ, and the consumption parameters (α_T, α_E) are poorly identified. With ψ=0.5 (50% persistence), parameter recovery improves dramatically — even without the reinforcement term change.
-
 ### Static Logit Starting Values Updated
 Updated `static_logit_orig` in `02_Estimation.jl` to match current static logit estimates:
 ```
-α_T=0.0187, α_E=0.0096, α_TE=-0.0021, λ_1=0.852, λ_2=0.703,
-λ_3=0.5, λ_4=0.5, ω=-0.0055, ξ_T=-3.573, ξ_E=-6.500, ξ_TE=-5.288
+α_C=0.0187, α_E=0.0096, α_CE=-0.0021, λ_1=0.852, λ_2=0.703,
+λ_3=0.5, λ_4=0.5, ω=-0.0055, ξ_C=-3.573, ξ_E=-6.500, ξ_CE=-5.288
 ```
-MC simulation (`02_MC_Simulation_Array.jl`) θ_true uses same original-unit values converted to standardized units at runtime, with μ=0.10 and γ=-0.10 (scaled for ã ∈ [0,1]). ψ is fixed from `get_fixed_parameters()`. MC starting values are deliberately offset from truth (α_T=0.5, α_E=0.3, α_TE=0.1, λ_1=0.4, λ_2=0.3, λ_3=0.3, λ_4=0.2, μ=0.1, γ=-0.1, ω=-1.0, ξ_T=-2.0, ξ_E=-4.0, ξ_TE=-3.0) to test optimizer recovery.
+MC simulation (`02_MC_Simulation_Array.jl`) θ_true uses original-unit consumption/expenditure values converted to standardized units at runtime, with updated flavor/fixed-effect values (see "MC True Parameters Updated" below). MC starting values are set to 50% of θ_true.
 
 ### Addiction Grid Normalization (ã = ψ·a/n_max)
 The addiction grid was changed from [0, 1/ψ] (ψ-dependent) to [0, 1] (fixed) by normalizing addiction via ã = ψ·a_raw/n_max. This keeps the grid on the same [0, 1] scale as all other standardized variables regardless of ψ.
@@ -846,8 +797,8 @@ The ψ·n_std term is the only difference. It scales the nicotine input so the s
 - `get_addiction_space(ψ)` accepts ψ for API compatibility but returns [0, 1] regardless.
 
 **Rescaling formulas updated:**
-- μ_orig = μ_std × ψ / n_max² (μ multiplies both ã and n_std — two standardized variables; ψ fixed)
-- γ_orig = γ_std × ψ / n_max (γ multiplies only ã — one standardized variable; ψ fixed)
+- μ_orig = μ_std × ψ / n_max² (μ multiplies both ã and n_std — two standardized variables; ψ fixed at 0.68)
+- γ_orig = γ_std × ψ / n_max (γ multiplies only ã — one standardized variable; ψ fixed at 0.68)
 
 **Files updated:** `01_Functions.jl` (grid, law of motion, docstrings), `01_MC_Simulation_Functions.jl` (inline law of motion), `01_Counterfactual_Functions.jl` (inline law of motion), `02_Estimation.jl` (starting values, rescaling notes), `02_MC_Simulation_Array.jl` (θ_true μ/γ values).
 
@@ -855,26 +806,33 @@ The ψ·n_std term is the only difference. It scales the nicotine input so the s
 Added choice share logging to `02_MC_Simulation_Array.jl` after data simulation. Logs the fraction of simulated choices in each category (outside, cig, orig_ecig, non_fda_flav_ecig, fda_flav_ecig, orig_bundle, non_fda_flav_bundle, fda_flav_bundle) to diagnose whether the DGP produces reasonable variation or is dominated by the outside option. High outside-option share (>85%) indicates weak identification of inside-alternative parameters.
 
 ### Counterfactual and Model Validation Scripts
-Both `02_Counterfactual_Flavor_Ban.jl` and `02_Model_Validation.jl` use `ψ` from `get_fixed_parameters()`, which returns ψ (fixed). Since ψ is no longer estimated (θ_hat is 13 elements), these scripts should work correctly with the current code — they pass θ_hat directly to `get_flow_utility()` which expects 13 elements.
+Both `02_Counterfactual_Flavor_Ban.jl` and `02_Model_Validation.jl` use `ψ` from `get_fixed_parameters()`, which returns ψ fixed at 0.68. These scripts pass θ_hat directly to `get_flow_utility()` which expects 13 elements.
 
 ### Static Nested Logit Added (`04_Static_Nested_Logit.jl`)
 New file implementing nested logit with 4 nests (outside, cigarettes, e-cigs, bundles) and 1 common σ parameter. Estimated σ̂ = 0.12 (t = 7.29) — statistically significant but modest departure from IIA. Decision: not worth incorporating into the dynamic model. Used as a robustness check.
 
-### Reduced-Form ψ Estimation and Fixing ψ
-Added `05_Reduced_Form_Psi.R` to estimate ψ from the reduced-form persistence of nicotine consumption. The AR(1) coefficient ρ̂ (Mundlak CRE with clustered SEs) gives ψ̂ = 1 - ρ̂. ψ is now fixed at this value in all estimation and MC simulation code (no longer estimated jointly). This resolves the ψ-μ identification ridge found in MC simulations.
-
 ### Separate Expenditure Terms Considered and Rejected
-Tested splitting ω into ω_T (cigarette expenditure) and ω_E (e-cig expenditure) in the static logit. Results: |ω_T| ≈ 3×|ω_E|, but ω_E only borderline significant (t = -2.14) and α_E halved due to collinearity between e-cig consumption and e-cig expenditure. Decision: reverted to single ω for both static logit and nested logit.
+Tested splitting ω into ω_C (cigarette expenditure) and ω_E (e-cig expenditure) in the static logit. Results: |ω_C| ≈ 3×|ω_E|, but ω_E only borderline significant (t = -2.14) and α_E halved due to collinearity between e-cig consumption and e-cig expenditure. Decision: reverted to single ω for both static logit and nested logit.
 
-### Beta Estimation Variant Added
-Created a parallel set of files to estimate β (present bias) as a structural parameter rather than fixing it at 1.0. The key identification strategy uses a 4-state TYA classification (from `05_TYA_State_Transitions.R`) with anticipated transitions: households approaching TYA status (state 2) or ending TYA status (state 4) face known future changes in the flavor utility term, and the degree to which they respond today vs. wait depends on β.
+### Beta Estimation Variant Added (then merged via ESTIMATE_BETA)
+Created β estimation support using a 4-state TYA classification (from `05_TYA_State_Transitions.R`) with anticipated transitions for identification. Originally implemented as parallel Beta files; later merged into the base files via the `ESTIMATE_BETA` flag (see below).
 
-**New files:**
+**New file:**
 - `01_First_Stage_Estimation/05_TYA_State_Transitions.R` — Computes 4-state TYA classification and monthly transition matrix from household member ages
-- `02_Second_Stage_Estimation/01_Functions_Beta.jl` — Beta variant of all estimation functions (14 params, 4-state TYA, Π_tya integration in VFI)
-- `05_MC_Simulation_Beta/01_MC_Simulation_Functions_Beta.jl` — MC-specific functions for Beta variant
-- `05_MC_Simulation_Beta/02_MC_Simulation_Array_Beta.jl` — Parallel MC via Slurm arrays with β estimation (true β = 0.95)
-- `05_MC_Simulation_Beta/02_MC_Simulation_Array_Beta_Slurm.sb` — Slurm script: 32 CPUs, 5 GB/CPU, 24hr, job array
+- `05_MC_Simulation_Beta/02_MC_Simulation_Array_Beta_Slurm.sb` — Slurm script for Beta MC (since deleted; MC with ESTIMATE_BETA/ESTIMATE_PSI now handled by flags in `05_MC_Simulation/02_MC_Simulation_Array.jl`)
+
+### Beta/Non-Beta File Merge via ESTIMATE_BETA Flag
+Merged parallel Beta estimation files into the base files using a single `ESTIMATE_BETA` flag. The flag is set at the top of each calling script before `include()`. When `true`, β is estimated as the last element of θ_vec; when `false` (default), β is fixed at 1.0.
+
+**Files merged (Beta files deleted):**
+- `01_Functions_Beta.jl` → merged into `01_Functions.jl`
+- `02_Estimation_Beta.jl` → merged into `02_Estimation.jl`
+- `01_MC_Simulation_Functions_Beta.jl` → merged into `01_MC_Simulation_Functions.jl`
+- `02_MC_Simulation_Array_Beta.jl` → merged into `02_MC_Simulation_Array.jl`
+
+**Calling scripts updated with `ESTIMATE_BETA = false`:**
+- `03_Standard_Errors.jl`, `02_Model_Validation.jl`, `02_Counterfactual_Flavor_Ban.jl`
+- `03_Static_Logit.jl`, `04_Static_Nested_Logit.jl`
 
 ### Output Format Standardization (TSV → CSV)
 All structured data output files across the codebase have been migrated from tab-separated `.txt` to comma-separated `.csv`:
@@ -896,7 +854,7 @@ All second-stage Julia scripts have been updated to use a consistent explicit co
 - `# Close the log file handle` before `close(log_io)`
 - Standardized section headers with `#############################`
 
-Files updated: `02_Estimation.jl`, `03_Standard_Errors.jl`, `02_Model_Validation.jl`, `02_Counterfactual_Flavor_Ban.jl`, `02_MC_Simulation_Array.jl`, `03_MC_Aggregate_Results.jl`, `02_MC_Simulation_Array_Beta.jl`.
+Files updated: `02_Estimation.jl`, `03_Standard_Errors.jl`, `02_Model_Validation.jl`, `02_Counterfactual_Flavor_Ban.jl`, `02_MC_Simulation_Array.jl`, `03_MC_Aggregate_Results.jl`.
 
 ### Sequential MC Simulation Removed
 `02_MC_Simulation.jl` (sequential, single-process version) has been removed. All MC simulation now uses `02_MC_Simulation_Array.jl` (Slurm job arrays) for parallelism.
@@ -918,18 +876,18 @@ Split the single "flavored e-cigarette" category into non-FDA flavored and FDA f
 
 **Files updated (dynamic model):** `01_Functions.jl` (get_flow_utility, bounds), `02_Estimation.jl`, `03_Standard_Errors.jl`, `02_Model_Validation.jl`, `01_Counterfactual_Functions.jl`, `02_Counterfactual_Flavor_Ban.jl`, `01_MC_Simulation_Functions.jl`, `02_MC_Simulation_Array.jl`.
 
-**Files updated (Beta):** `01_Functions_Beta.jl`, `02_Estimation_Beta.jl`, `01_MC_Simulation_Functions_Beta.jl`, `02_MC_Simulation_Array_Beta.jl`.
+**Files updated (Beta):** Merged into base files via `ESTIMATE_BETA` flag (see "Beta/Non-Beta File Merge" above).
 
 **Files updated (static):** `03_Static_Logit.jl` (12 params), `04_Static_Nested_Logit.jl` (13 params).
 
 ### 4-State TYA Migrated to Base Estimation
-The 4-state TYA classification with Π_tya transition matrix integration in VFI was originally only in Beta files. It has now been migrated to the base `01_Functions.jl` and all calling scripts, so both base and Beta use identical TYA handling. The only remaining difference between base and Beta is whether β is fixed at 1.0 or estimated.
+The 4-state TYA classification with Π transition matrix integration in VFI was originally only in Beta files. It has now been migrated to the base `01_Functions.jl` and all calling scripts, so both base and Beta use identical TYA handling. The only remaining difference between base and Beta is whether β is fixed at 1.0 or estimated.
 
 **Key changes:**
 - `get_tya_states()` and `get_tya_transitions()` added to `01_Functions.jl`
 - `get_flow_utility()`: N_TYA = 4 (was 2); states 1,2 → tya=0; states 3,4 → tya=1
-- `recompute_choice_values_2tya!` replaced by `recompute_choice_values_4tya!` (8 EV accumulators for 4 TYA states, TYA transition integration via Π_tya)
-- `solve_vfi()` and `solve_vfi_sophisticated()`: added Π_tya parameter, expanded to 4 TYA states
-- `objective()`: passes Π_tya to solve_vfi_sophisticated
+- `recompute_choice_values_2tya!` replaced by `recompute_choice_values!` (8 EV accumulators for 4 TYA states, TYA transition integration via Π)
+- `solve_vfi()` and `solve_vfi_sophisticated()`: added Π parameter, expanded to 4 TYA states
+- `objective()`: passes Π to solve_vfi_sophisticated
 - All calling scripts updated: `02_Estimation.jl`, `03_Standard_Errors.jl`, `02_Model_Validation.jl`, `02_Counterfactual_Flavor_Ban.jl`, `01_MC_Simulation_Functions.jl`, `02_MC_Simulation_Array.jl`
 - Old `get_teen_young_adult()` and `get_tya_state()` kept in `01_Functions.jl` for backward compatibility with static logit scripts

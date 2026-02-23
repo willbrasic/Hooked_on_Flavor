@@ -180,7 +180,7 @@ if (file.exists(file_name))
 }
 
 # Write predicted next period prices to a file
-file_name <- "../Dynamic_Model/Halton_Draw_Transitions.csv"
+file_name <- "../Dynamic_Model/Data/Halton_Draw_Transitions.csv"
 fwrite(T_wide, file_name)
 
 # Confirm results have been written to a file

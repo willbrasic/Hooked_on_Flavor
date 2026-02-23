@@ -5,21 +5,28 @@
 # February 2026
 #
 # This script computes TYA (teen/young adult) state transition probabilities
-# from household member ages. The TYA state is expanded from binary {0, 1} to
-# a 4-state variable that captures proximity to transition:
+# from household member ages. The TYA state uses a 4-state classification
+# based on proximity to transition, enabling identification of beta
+# (present bias):
 #
-#   State 1: No TYA, stable (no child within 2 years of teen age)
-#   State 2: No TYA, approaching (oldest child is 11-12)
-#   State 3: TYA present, stable (youngest TYA member <= 23)
-#   State 4: TYA present, ending soon (youngest TYA member >= 24)
+#   --- No TYA present (tya indicator = 0) ---
+#   State 1: No TYA, stable (oldest child <= 11 or no children)
+#   State 2: No TYA, approaching (oldest child == 12, ~0-1 year to TYA)
+#
+#   --- TYA present (tya indicator = 1) ---
+#   State 3: TYA present, stable (youngest TYA member <= 24)
+#   State 4: TYA present, ending soon (youngest TYA member >= 25)
 #
 # Age definitions (from HMS):
 #   Teen: 13-18 (inclusive)
 #   Young adult: 19-25 (inclusive)
 #   TYA: 13-25, ages out at 26
 #
-# The transition matrix allows the structural model to capture anticipated
-# TYA changes, enabling identification of beta (present bias parameter).
+# Key transitions for beta identification:
+#   State 2 -> 3: child turns 13, becomes TYA (~3% monthly)
+#   State 4 -> 1: youngest TYA turns 26, ages out (~4% monthly)
+#
+# TYA indicator for flow utility: states 1,2 -> tya=0; states 3,4 -> tya=1
 #
 # Outputs (to Dynamic_Model/Data/):
 #   - TYA_States.csv: household-month TYA state assignments
@@ -81,9 +88,6 @@ all_age_cols <- c("male_head_age", "female_head_age", age_cols)
 keep_cols <- c(id_col, time_col, "teen_or_young_adult_present", all_age_cols)
 dt <- dt[, ..keep_cols]
 
-# Raw CSV is pre-sorted by (household_code, purchase_month) from
-# 04_Monthly_Aggregation_2021-Onward.R — no additional sorting needed.
-
 
 #############################
 # Compute youngest TYA
@@ -120,10 +124,10 @@ dt[, oldest_child_age := oldest_child]
 #############################
 
 # 4-state TYA classification based on proximity to transition:
-#   State 1: No TYA, stable — no TYA member AND oldest child <= 10 (or no children)
-#   State 2: No TYA, approaching — no TYA member BUT oldest child is 11-12
-#   State 3: TYA present, stable — youngest TYA member <= 23
-#   State 4: TYA present, ending soon — youngest TYA member >= 24
+#   State 1: No TYA, stable — no TYA member AND oldest child <= 11 (or no children)
+#   State 2: No TYA, approaching — no TYA member BUT oldest child is 12
+#   State 3: TYA present, stable — youngest TYA member <= 24
+#   State 4: TYA present, ending soon — youngest TYA member >= 25
 #
 # ~2% of observations have a mismatch between teen_or_young_adult_present
 # and the Member_*_Age columns. We use teen_or_young_adult_present as the
@@ -131,15 +135,15 @@ dt[, oldest_child_age := oldest_child]
 # to state 3 (stable).
 
 dt[, tya_state := fcase(
-  teen_or_young_adult_present == 0 & (is.na(oldest_child_age) | oldest_child_age <= 10), 1L,
-  teen_or_young_adult_present == 0 & oldest_child_age >= 11,                              2L,
-  teen_or_young_adult_present == 1 & !is.na(youngest_tya_age) & youngest_tya_age <= 23,   3L,
-  teen_or_young_adult_present == 1 & !is.na(youngest_tya_age) & youngest_tya_age >= 24,   4L,
-  teen_or_young_adult_present == 1 & is.na(youngest_tya_age),                              3L
+  teen_or_young_adult_present == 0 & (is.na(oldest_child_age) | oldest_child_age <= 11), 1,
+  teen_or_young_adult_present == 0 & oldest_child_age == 12,                             2,
+  teen_or_young_adult_present == 1 & !is.na(youngest_tya_age) & youngest_tya_age <= 24,  3,
+  teen_or_young_adult_present == 1 & !is.na(youngest_tya_age) & youngest_tya_age >= 25,  4,
+  teen_or_young_adult_present == 1 & is.na(youngest_tya_age),                            3
 )]
 
 # State distribution
-dt[, .(N = .N, pct = round(.N / nrow(dt) * 100, 2)), keyby = tya_state]
+print(dt[, .(N = .N, pct = round(.N / nrow(dt) * 100, 2)), keyby = tya_state])
 
 
 #############################
@@ -153,20 +157,21 @@ dt[, tya_state_next := shift(tya_state, n = 1, type = "lead"), by = id_col]
 # Drop last observation per household (no lead available)
 dt_trans <- dt[!is.na(tya_state_next)]
 
-# TYA states
+# All 4 TYA states
 states <- 1:4
 
 # Tabulate transitions (tya_state -> tya_state_next) with full support
+# across all 4x4 = 16 possible (from, to) pairs
 dt_counts <- dt_trans[, .N, keyby = .(from = tya_state, to = tya_state_next)]
 dt_counts <- dt_counts[CJ(from = states, to = states), on = .(from, to)]
 dt_counts[is.na(N), N := 0L]
 
-# Counts matrix
+# Counts matrix (4x4)
 mat_counts <- dcast(dt_counts, from ~ to, value.var = "N", fill = 0L)
 mat_counts <- mat_counts[match(states, from)]
 setcolorder(mat_counts, c("from", as.character(states)))
 
-# Row-stochastic transition probability matrix
+# Row-stochastic transition probability matrix (4x4)
 m <- as.matrix(mat_counts[, -1])
 rownames(m) <- mat_counts$from
 P <- m / rowSums(m)
@@ -184,7 +189,7 @@ file_name_transitions <- "TYA_Transition_Matrix.csv"
 # TYA state assignments (one per household-month observation)
 fwrite(dt[, .(tya_state)], file.path(wd_out, file_name_states))
 
-# Transition matrix (from, to, probability) in long format
+# Transition matrix (from, to, probability) in long format (4x4 = 16 rows)
 dt_trans_mat <- CJ(from = states, to = states)
 dt_trans_mat[, prob := as.vector(t(P))]
 fwrite(dt_trans_mat, file.path(wd_out, file_name_transitions))
@@ -192,10 +197,10 @@ fwrite(dt_trans_mat, file.path(wd_out, file_name_transitions))
 # Confirm results have been written
 if (file.exists(file.path(wd_out, file_name_states)) & file.exists(file.path(wd_out, file_name_transitions)))
 {
-  cat("Results have been written to\n", wd_out, "\n")
+  cat("\nResults have been written to\n", wd_out, "\n")
 } else
 {
-  cat("Error: Results could not be written\n")
+  cat("\nError: Results could not be written\n")
 }
 
 

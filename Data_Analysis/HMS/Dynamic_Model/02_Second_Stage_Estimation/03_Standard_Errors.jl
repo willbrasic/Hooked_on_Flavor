@@ -7,10 +7,11 @@
 # This script computes standard errors for the dynamic model parameter
 # estimates via finite differences on the full objective function.
 #
-# The Hessian H of the negative log-likelihood is approximated numerically:
-#   - Diagonal:     H[k,k] ≈ (f(θ+h·e_k) - 2·f(θ) + f(θ-h·e_k)) / h^2
-#   - Off-diagonal: H[k,l] ≈ (f(θ+h·e_k+h·e_l) - f(θ+h·e_k-h·e_l)
-#                            -  f(θ-h·e_k+h·e_l) + f(θ-h·e_k-h·e_l)) / (4h^2)
+# The Hessian H of the negative log-likelihood is approximated numerically
+# using parameter-relative step sizes h_k = max(|θ_hat[k]| * 1e-4, 1e-5):
+#   - Diagonal:     H[k,k] ≈ (f(θ+h_k·e_k) - 2·f(θ) + f(θ-h_k·e_k)) / h_k^2
+#   - Off-diagonal: H[k,l] ≈ (f(θ+h_k·e_k+h_l·e_l) - f(θ+h_k·e_k-h_l·e_l)
+#                            -  f(θ-h_k·e_k+h_l·e_l) + f(θ-h_k·e_k-h_l·e_l)) / (4·h_k·h_l)
 #
 # Each evaluation of f(θ) requires solving VFI from scratch, so this is slow
 # but gives correct SEs that account for how V_choice changes with θ.
@@ -18,8 +19,9 @@
 # Variance-covariance matrix: H^{-1}
 # Standard errors: SE[k] = sqrt(H^{-1}[k,k])
 #
-# Reads estimated parameters from Dynamic_Model_Estimates.csv (produced by
-# 02_Estimation.jl). Progress is logged to SE_Log.txt.
+# Reads estimated parameters from Dynamic_Model_<beta_tag>_Estimates.csv
+# (produced by 02_Estimation.jl). Progress is logged to
+# Dynamic_Model_<beta_tag>_SE_Log.txt.
 ################################################################################
 
 
@@ -27,9 +29,34 @@
 # Preliminaries
 #############################
 
+# Base model: β is fixed at 1.0 (not estimated)
+ESTIMATE_BETA = false
+
+# Base model: ψ is fixed at 0.68 (not estimated)
+ESTIMATE_PSI = false
+
+# Enable warm-start VFI: reuse the previous evaluation's converged V as the
+# initial guess. The small θ perturbations (h ~ 1e-4) mean the previous V is
+# an excellent starting point, reducing VFI iterations from ~948 to ~7-50.
+WARM_START = true
+
 # Load all functions and packages from the functions file
 include("01_Functions.jl")
 using LinearAlgebra
+
+# Initialize warm-start globals for SE computation. Since we are not using
+# random_amoeba, the phase never changes, so V_warm_est is reused across
+# all objective evaluations. The small θ perturbations (h ~ 1e-4) mean
+# the previous V is an excellent warm-start.
+ra_outer_try = 1
+ra_inner_run = 1
+V_warm_est = nothing
+last_ra_phase_est = (1, 1)
+
+# Construct psi and beta tags for output directory and file naming.
+ψ_naming, β_naming, _ = get_fixed_parameters()
+psi_tag = ESTIMATE_PSI ? "Psi_Estimated" : "Psi_$(ψ_naming)"
+beta_tag = ESTIMATE_BETA ? "Beta_Estimated" : "Beta_$(β_naming)"
 
 # Set working directory to where the data CSVs live
 cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Data")
@@ -39,15 +66,16 @@ cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_D
 # Output Paths
 #############################
 
-# Output path for results (local Windows path)
-output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Results"
-log_path = joinpath(output_dir, "SE_Log.txt")
+# Output path for results (local Windows path, includes beta tag in directory name)
+output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_$(psi_tag)_$(beta_tag)_Results"
+mkpath(output_dir)
+log_path = joinpath(output_dir, "Dynamic_Model_$(psi_tag)_$(beta_tag)_SE_Log.txt")
 
 # Open log file for writing (log_io is defined as a global in 01_Functions.jl)
 log_io = open(log_path, "w")
 
 # Print and log SE computation start time
-log_msg("SE computation started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+log_msg("SE computation ($(psi_tag), $(beta_tag)) started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
 
 
 #############################
@@ -57,8 +85,11 @@ log_msg("SE computation started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
 # Start timer for data prep
 t_setup = time()
 
-# Load fixed parameters (ψ is the addiction decay rate, fixed from reduced-form AR(1) estimate)
-ψ, _, _ = get_fixed_parameters();
+# Load fixed parameters:
+#   ψ = addiction decay rate (fixed at 0.68; overridden when ESTIMATE_PSI = true)
+#   β = present bias (fixed at 1.0; overridden by optimizer when ESTIMATE_BETA = true)
+#   δ = monthly discount factor (fixed at 0.99)
+ψ, β, δ = get_fixed_parameters();
 
 # Get number of addiction states (N_A = 20) and the normalized addiction grid A
 N_A, A = get_addiction_space(ψ);
@@ -81,9 +112,9 @@ N_K, _ = get_category_choices();
 #############################
 
 # Get consumption vectors by alternative (STANDARDIZED by max)
-# c_bundle is standardized by its own max (not c_cig_max × c_ecig_max) for reasonable α_TE scaling
+# q_bundle is standardized by its own max (not q_cig_max × q_ecig_max) for reasonable α_CE scaling
 # Max values are needed for rescaling parameter estimates to original units
-N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, _, c_cig, c_ecig, c_bundle, c_cig_max, c_ecig_max, c_bundle_max = get_consumption(N_J);
+N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, _, q_cig, q_ecig, q_bundle, q_cig_max, q_ecig_max, q_bundle_max = get_consumption(N_J);
 
 # Get nicotine vector by alternative (STANDARDIZED by max)
 # n_max is the raw max value for rescaling estimates
@@ -92,8 +123,8 @@ n, n_max = get_nicotine(N_J);
 # Get category index by alternative
 cat_idx = get_category_index(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig);
 
-# Get non-FDA flavored indicator by alternative: is_non_fda_flavored[j] ∈ {0, 1}
-is_non_fda_flavored = get_non_fda_flavored_indicator(cat_idx);
+# Get flavored indicator by alternative: is_flavored[j] ∈ {true, false} (any flavored: non-FDA or FDA)
+is_flavored = get_flavored_indicator(cat_idx);
 
 # Get FDA flavored indicator by alternative: is_fda_flavored[j] ∈ {0, 1}
 is_fda_flavored = get_fda_flavored_indicator(cat_idx);
@@ -108,9 +139,9 @@ is_fda_flavored = get_fda_flavored_indicator(cat_idx);
 # State 3: TYA present, stable; State 4: TYA present, ending soon
 tya_state = get_tya_states()
 
-# Load 4×4 monthly TYA transition matrix Π_tya[s, s'] = P(TYA' = s' | TYA = s)
+# Load 4×4 monthly TYA transition matrix Π[s, s'] = P(TYA' = s' | TYA = s)
 # Used in VFI to integrate over anticipated TYA state changes
-Π_tya = get_tya_transitions()
+Π = get_tya_transitions()
 
 
 #############################
@@ -124,11 +155,11 @@ N_P, P = get_pricing_spaces();
 N_Pcomb, Pcomb = get_pricing_spaces_combination(N_K, N_P, P);
 
 # Get price ratios for quantity discount adjustment (price per unit varies by bin size)
-ratio_cig, ratio_ecig = get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, c_cig, c_ecig);
+ratio_cig, ratio_ecig = get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, q_cig, q_ecig);
 
-# Get expenditure matrix E[p, j] = p_cig(p) * c_cig[j] + p_ecig(p) * c_ecig[j]
+# Get expenditure matrix E[p, j] = p_cig(p) * q_cig[j] + p_ecig(p) * q_ecig[j]
 # STANDARDIZED by E_max; E_max is the raw max value for rescaling estimates
-E, E_max = get_expenditures(N_J, N_Pcomb, c_cig, c_ecig, c_cig_max, c_ecig_max, Pcomb, ratio_cig, ratio_ecig);
+E, E_max = get_expenditures(N_J, N_Pcomb, q_cig, q_ecig, q_cig_max, q_ecig_max, Pcomb, ratio_cig, ratio_ecig);
 
 # Get Halton draw price transitions: T[m, r, k] where m = price state, r = draw, k = category
 T = get_transitions(N_K);
@@ -156,21 +187,18 @@ log_msg("Observations: $(length(y))")
 # Fixed Parameters
 #############################
 
-# ψ is fixed from reduced-form AR(1) estimate (loaded above via get_fixed_parameters)
-
-# Present bias parameter (β-δ discounting; β = 1.0 is standard exponential)
-β = 1.0
-
-# Monthly discount factor (fixed at 0.99)
-δ = 0.99
+# ψ, β, δ are all loaded above via get_fixed_parameters()
+# ψ = addiction decay rate (fixed at 0.68; overridden when ESTIMATE_PSI = true)
+# β = 1.0 (standard exponential discounting; present bias when ESTIMATE_BETA = true)
+# δ = 0.99 (monthly discount factor)
 
 
 #############################
 # Load Estimated Parameters
 #############################
 
-# Read θ_hat from the estimates file produced by 02_Estimation.jl
-estimates_path = joinpath(output_dir, "Dynamic_Model_Estimates.csv")
+# Read θ_hat from the estimates file produced by 02_Estimation.jl (includes beta tag in filename)
+estimates_path = joinpath(output_dir, "Dynamic_Model_$(psi_tag)_$(beta_tag)_Estimates.csv")
 df_est = CSV.read(estimates_path, DataFrame)
 
 # Extract parameter names and values
@@ -213,14 +241,18 @@ log_msg("neg LL at θ_hat = $(round(nll_center, digits=4)) ($(round(eval_elapsed
 # The Hessian H is a matrix of second derivatives:
 #   H[k, l] = ∂^2 nll / ∂θ_k ∂θ_l
 #
-# We approximate this using central differences:
-#   H[k, l] ≈ (nll(θ + h·e_k + h·e_l) - nll(θ + h·e_k - h·e_l)
-#            -  nll(θ - h·e_k + h·e_l) + nll(θ - h·e_k - h·e_l)) / (4h^2)
+# We approximate this using central differences with parameter-relative step
+# sizes h_k = max(|θ_hat[k]| * 1e-4, 1e-5). This scales with parameter
+# magnitude and has a floor for near-zero parameters.
 #
-# where e_k is a unit vector in direction k and h is a small step size.
+# Off-diagonal (k ≠ l):
+#   H[k, l] ≈ (nll(θ + h_k·e_k + h_l·e_l) - nll(θ + h_k·e_k - h_l·e_l)
+#            -  nll(θ - h_k·e_k + h_l·e_l) + nll(θ - h_k·e_k - h_l·e_l)) / (4·h_k·h_l)
+#
+# where e_k is a unit vector in direction k.
 #
 # For diagonal entries (k == l), this simplifies to:
-#   H[k, k] ≈ (nll(θ + h·e_k) - 2·nll(θ) + nll(θ - h·e_k)) / h^2
+#   H[k, k] ≈ (nll(θ + h_k·e_k) - 2·nll(θ) + nll(θ - h_k·e_k)) / h_k^2
 #
 # Then: Var-Cov = H^{-1}, and SE[k] = sqrt(H^{-1}[k, k])
 #
@@ -235,8 +267,11 @@ log_msg("==============================================")
 
 t_hessian = time()
 
-# Step size for finite differences
-h = 1e-3
+# Parameter-relative step sizes for finite differences
+# Each h_k scales with the magnitude of θ_hat[k] (relative step of 1e-4) with a
+# floor of 1e-5 for near-zero parameters. This avoids under-stepping large
+# parameters and over-stepping small ones.
+h_vec = [max(abs(θ_hat[k]) * 1e-4, 1e-5) for k in 1:N_params]
 
 # Allocate Hessian matrix
 H = zeros(N_params, N_params)
@@ -258,43 +293,48 @@ for k in 1:N_params
         pair_count += 1
         t_pair = time()
 
+        # Parameter-specific step sizes for this pair
+        h_k = h_vec[k]
+
         if k == l
 
             # Diagonal entry: perturb in one direction only
-            # H[k, k] ≈ (f(θ + h·e_k) - 2·f(θ) + f(θ - h·e_k)) / h^2
+            # H[k, k] ≈ (f(θ + h_k·e_k) - 2·f(θ) + f(θ - h_k·e_k)) / h_k^2
             θ_plus  = copy(θ_hat)
             θ_minus = copy(θ_hat)
-            θ_plus[k]  += h
-            θ_minus[k] -= h
+            θ_plus[k]  += h_k
+            θ_minus[k] -= h_k
 
             f_plus = objective(θ_plus)
             f_minus = objective(θ_minus)
 
-            H[k, k] = (f_plus - 2.0 * nll_center + f_minus) / h^2
+            H[k, k] = (f_plus - 2.0 * nll_center + f_minus) / h_k^2
 
             pair_elapsed = time() - t_pair
-            log_msg("  Pair $pair_count/$n_total | H[$k,$l] (diagonal) = $(round(H[k,k], digits=4)) | $(round(pair_elapsed, digits=1))s")
+            log_msg("  Pair $pair_count/$n_total | H[$k,$l] (diagonal) = $(round(H[k,k], digits=4)) | h_k=$(round(h_k, sigdigits=3)) | $(round(pair_elapsed, digits=1))s")
 
         else
 
+            h_l = h_vec[l]
+
             # Off-diagonal entry: perturb in both directions
-            # H[k, l] ≈ (f(θ++) - f(θ+-) - f(θ-+) + f(θ--)) / (4h^2)
+            # H[k, l] ≈ (f(θ++) - f(θ+-) - f(θ-+) + f(θ--)) / (4·h_k·h_l)
             θ_pp = copy(θ_hat)  # Perturb upward in both dimensions
             θ_pm = copy(θ_hat)  # Perturb upward for k, downward for l
             θ_mp = copy(θ_hat)  # Perturb downward for k, upward for l
             θ_mm = copy(θ_hat)  # Perturb downward in both dimensions
 
             # Perturb in direction k
-            θ_pp[k] += h
-            θ_pm[k] += h
-            θ_mp[k] -= h
-            θ_mm[k] -= h
+            θ_pp[k] += h_k
+            θ_pm[k] += h_k
+            θ_mp[k] -= h_k
+            θ_mm[k] -= h_k
 
             # Perturb in direction l
-            θ_pp[l] += h
-            θ_pm[l] -= h
-            θ_mp[l] += h
-            θ_mm[l] -= h
+            θ_pp[l] += h_l
+            θ_pm[l] -= h_l
+            θ_mp[l] += h_l
+            θ_mm[l] -= h_l
 
             # Evaluate objective at all four perturbed points
             f_pp = objective(θ_pp)
@@ -303,13 +343,13 @@ for k in 1:N_params
             f_mm = objective(θ_mm)
 
             # Central difference formula for cross-partial
-            H[k, l] = (f_pp - f_pm - f_mp + f_mm) / (4.0 * h^2)
+            H[k, l] = (f_pp - f_pm - f_mp + f_mm) / (4.0 * h_k * h_l)
 
             # Hessian is symmetric
             H[l, k] = H[k, l]
 
             pair_elapsed = time() - t_pair
-            log_msg("  Pair $pair_count/$n_total | H[$k,$l] (off-diag) = $(round(H[k,l], digits=4)) | $(round(pair_elapsed, digits=1))s")
+            log_msg("  Pair $pair_count/$n_total | H[$k,$l] (off-diag) = $(round(H[k,l], digits=4)) | h_k=$(round(h_k, sigdigits=3)), h_l=$(round(h_l, sigdigits=3)) | $(round(pair_elapsed, digits=1))s")
 
         end
     end
@@ -370,8 +410,8 @@ end
 # Save Results
 #############################
 
-# Save standard errors to a CSV file
-se_path = joinpath(output_dir, "Dynamic_Model_Standard_Errors.csv")
+# Save standard errors to a CSV file (includes beta tag in filename)
+se_path = joinpath(output_dir, "Dynamic_Model_$(psi_tag)_$(beta_tag)_Standard_Errors.csv")
 open(se_path, "w") do io
     println(io, join(param_names, ","))
     println(io, join([@sprintf("%.10f", θ_hat[k]) for k in 1:N_params], ","))

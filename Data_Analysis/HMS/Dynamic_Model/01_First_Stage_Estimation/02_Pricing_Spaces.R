@@ -77,7 +77,7 @@ dt_prices_long <- dcast(
 dt_prices_long
 
 # Write to file
-file_name <- "../Dynamic_Model/Pricing_Spaces.csv"
+file_name <- "../Dynamic_Model/Data/Pricing_Spaces.csv"
 fwrite(dt_prices_long, file_name)
 
 # Confirm results have been written to a file

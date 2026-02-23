@@ -5,27 +5,30 @@
 # February 2026
 #
 # This script tests for anticipatory behavior around TYA (teen/young adult)
-# status transitions as reduced-form evidence for present bias. The 4-state
-# TYA classification from 05_TYA_State_Transitions.R captures proximity to
-# transition:
+# status transitions as reduced-form evidence for forward-looking behavior
+# and beta (present bias) identification. The 4-state TYA classification
+# from 05_TYA_State_Transitions.R captures proximity to transition:
 #
-#   State 1: No TYA, stable (no child within 2 years of teen age)
-#   State 2: No TYA, approaching (oldest child is 11-12)
-#   State 3: TYA present, stable (youngest TYA member <= 23)
-#   State 4: TYA present, ending soon (youngest TYA member >= 24)
+#   --- No TYA present (tya indicator = 0) ---
+#   State 1: No TYA, stable (oldest child <= 11 or no children)
+#   State 2: No TYA, approaching (oldest child == 12, ~0-1 year to TYA)
 #
-# Under beta = 1 (exponential discounting), forward-looking households in
-# anticipatory states (2, 4) should adjust flavored e-cig purchases BEFORE
-# the transition occurs, since they anticipate the future utility change
-# from lambda_2 * 1[flavored] * 1[TYA].
+#   --- TYA present (tya indicator = 1) ---
+#   State 3: TYA present, stable (youngest TYA member <= 24)
+#   State 4: TYA present, ending soon (youngest TYA member >= 25)
 #
-# Under beta < 1 (present bias), adjustment concentrates at or after the
-# actual transition. Anticipatory states should show weaker responses.
+# Key tests:
+#   1. Mean flavored e-cig shares across all 4 TYA states
+#   2. Within TYA=0: state 2 vs state 1 (approaching vs stable)
+#      If forward-looking, state 2 should show higher flavored purchasing
+#      in anticipation of gaining TYA access.
+#   3. Within TYA=1: state 4 vs state 3 (ending soon vs stable)
+#      If forward-looking, state 4 should show lower flavored purchasing
+#      in anticipation of losing TYA access.
 #
-# This script estimates:
-#   Within TYA=1 — ending soon (state 4) vs stable (state 3)
-#   Binned TYA member age — tests whether the state 4 vs 3 difference
-#     reflects a smooth age gradient or is concentrated near the transition
+# Under beta = 1, forward-looking households adjust BEFORE the transition.
+# Under beta < 1 (present bias), adjustment is weaker or absent until
+# the transition actually occurs.
 #
 # Sample: restricted to households that ever purchased e-cigs (ecig = 1 or
 # cig_ecig = 1), since never-buyers have no channel through which TYA
@@ -101,9 +104,12 @@ dt_raw <- fread(file.path(wd_raw,
 # Construct outcome variables
 #############################
 
-# Flavored e-cig column names (7 flavored ecig bins + 2 flavored bundles)
-flav_ecig_cols   <- grep("^flav_ecig_", names(dt_choices), value = TRUE)
-flav_bundle_cols <- grep("^bundle_flav_", names(dt_choices), value = TRUE)
+# Flavored e-cig column names: non-FDA flavored ecig bins, FDA flavored ecig bins,
+# and their corresponding bundle alternatives. Column names from 01_Data_Prep.R
+# start with "non_fda_flav_ecig_", "fda_flav_ecig_", "bundle_non_fda_flav_",
+# and "bundle_fda_flav_" respectively.
+flav_ecig_cols   <- grep("_flav_ecig_", names(dt_choices), value = TRUE)
+flav_bundle_cols <- grep("^bundle_.*flav_", names(dt_choices), value = TRUE)
 flav_cols <- c(flav_ecig_cols, flav_bundle_cols)
 
 # Purchased flavored e-cig indicator: 1 if any flavored alt chosen
@@ -127,11 +133,11 @@ for (i in seq_along(alt_names))
 {
   alt <- alt_names[i]
 
-  if (grepl("^flav_ecig_", alt))
+  if (grepl("_flav_ecig_", alt))
   {
-    # Pure flavored e-cig alternatives
+    # Pure flavored e-cig alternatives (non-FDA or FDA flavored)
     flav_ecig_ml[i] <- dt_consumption[alternative == alt, consumption]
-  } else if (grepl("^bundle_flav_", alt))
+  } else if (grepl("^bundle_.*flav_", alt))
   {
     # Flavored bundle: e-cig component only
     ecig_name <- paste0(alt, "_ecig")
@@ -188,6 +194,83 @@ dt <- dt[ever_ecig == 1]
 # Create TYA state indicators
 dt[, tya_approaching := as.integer(tya_state == 2)]
 dt[, tya_ending_soon := as.integer(tya_state == 4)]
+
+
+#############################
+# Mean flavored shares by
+# TYA state
+#############################
+
+# Descriptive comparison: mean flavored e-cig purchase rate and mL consumed
+# across all 4 TYA states. States 1,2 have tya=0; states 3,4 have tya=1.
+cat("\n==============================\n")
+cat("Mean flavored e-cig purchase rate by TYA state:\n")
+cat("==============================\n")
+dt_means <- dt[, .(
+  N           = .N,
+  flav_rate   = round(mean(purchased_flav), 4),
+  flav_ml     = round(mean(flav_ml), 4),
+  cig_rate    = round(mean(purchased_cig), 4)
+), keyby = tya_state]
+print(dt_means)
+
+# Within tya=0: state 1 vs state 2 comparison
+cat("\nWithin TYA=0 (states 1 vs 2):\n")
+dt_tya0_means <- dt[tya == 0, .(
+  N         = .N,
+  flav_rate = round(mean(purchased_flav), 4),
+  flav_ml   = round(mean(flav_ml), 4),
+  cig_rate  = round(mean(purchased_cig), 4)
+), keyby = tya_state]
+print(dt_tya0_means)
+
+# Within tya=1: state 3 vs state 4 comparison
+cat("\nWithin TYA=1 (states 3 vs 4):\n")
+dt_tya1_means <- dt[tya == 1, .(
+  N         = .N,
+  flav_rate = round(mean(purchased_flav), 4),
+  flav_ml   = round(mean(flav_ml), 4),
+  cig_rate  = round(mean(purchased_cig), 4)
+), keyby = tya_state]
+print(dt_tya1_means)
+
+
+#############################
+# Within
+# TYA = 0 (approaching vs
+# stable)
+#############################
+
+# Restrict to TYA = 0 (states 1 and 2 only)
+# Tests whether approaching households (state 2) differ from stable (state 1)
+dt_tya0 <- dt[tya == 0]
+
+# Extensive margin: flavored e-cig purchase indicator
+cat("\n==============================\n")
+cat("Within TYA=0: State 2 (approaching) vs State 1 (stable)\n")
+cat("==============================\n")
+est_flav_within0 <- feols(
+  purchased_flav ~ tya_approaching | household_code + purchase_month,
+  data    = dt_tya0,
+  cluster = ~household_code
+)
+summary(est_flav_within0)
+
+# Intensive margin: flavored e-cig mL consumed
+est_ml_within0 <- feols(
+  flav_ml ~ tya_approaching | household_code + purchase_month,
+  data    = dt_tya0,
+  cluster = ~household_code
+)
+summary(est_ml_within0)
+
+# Placebo: cigarette purchases (should not be affected by TYA transitions)
+est_cig_within0 <- feols(
+  purchased_cig ~ tya_approaching | household_code + purchase_month,
+  data    = dt_tya0,
+  cluster = ~household_code
+)
+summary(est_cig_within0)
 
 
 #############################

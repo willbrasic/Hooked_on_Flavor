@@ -215,6 +215,17 @@ dt_monthly[flavored_ecig == 1 & fda_flavored_ecig == 1 & non_fda_flavored_ecig =
 dt_monthly[flavored_ecig == 1 & fda_flavored_ecig == 0 & non_fda_flavored_ecig == 1,
            total_non_fda_flavored_mL := total_flavored_mL]
 
+# # Mutual exclusivity checks (each one should print zero)
+# dt_monthly[fda_flavored_ecig == 1 & non_fda_flavored_ecig == 1, .N]
+# dt_monthly[flavored_ecig == 0 & (fda_flavored_ecig == 1 | non_fda_flavored_ecig == 1), .N]
+# dt_monthly[flavored_ecig == 1 & (fda_flavored_ecig + non_fda_flavored_ecig) != 1, .N]
+# dt_monthly[fda_flavored_ecig == 0 & total_fda_flavored_mL > 0, .N]
+# dt_monthly[non_fda_flavored_ecig == 0 & total_non_fda_flavored_mL > 0, .N]
+# dt_monthly[fda_flavored_ecig == 1 & total_fda_flavored_mL == 0, .N]
+# dt_monthly[non_fda_flavored_ecig == 1 & total_non_fda_flavored_mL == 0, .N]
+# dt_monthly[flavored_ecig == 1 & total_fda_flavored_mL + total_non_fda_flavored_mL !=
+#              total_flavored_mL, .N]
+
 # Define (cig, e-cig) category
 dt_monthly[, `:=`(
   cig_ecig = fifelse(cig == 1 & ecig == 1, 1, 0),
