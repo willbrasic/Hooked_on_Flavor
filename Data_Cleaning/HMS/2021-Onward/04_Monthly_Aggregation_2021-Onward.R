@@ -360,17 +360,107 @@ dt_monthly[, lapply(.SD, function(x) sum(is.na(x)))]
 # data to a file
 #############################
 
-# Write the full panel data table to a file
+# Write the tobacco-purchaser-only panel to a file
 file_name_csv <- paste0("./tobacco_panelists_purchases_monthly_CLEANED_2021-Onward.csv")
 file_name_rds <- paste0("./tobacco_panelists_purchases_monthly_CLEANED_2021-Onward.rds")
 fwrite(dt_monthly, file_name_csv)
 saveRDS(dt_monthly, file_name_rds)
 
 # Confirm results have been written to a file
-if (file.exists(file_name_csv) & file.exists(file_name_rds)) 
+if (file.exists(file_name_csv) & file.exists(file_name_rds))
 {
   cat("Results have been written to\n", file_name_csv, "\nand\n", file_name_rds, "\n")
-} else 
+} else
+{
+  cat("Error: File could not be written\n")
+}
+
+
+#############################
+# Append non-tobacco
+# households (outside option
+# in every period) to form
+# full population panel
+#############################
+
+# Load non-tobacco household demographics
+dt_non_tobacco_hh <- readRDS("../non-tobacco_panelists_information_2021-Onward.rds")
+
+# Build complete month grid for each non-tobacco household-year pair
+hh_years_nt <- unique(dt_non_tobacco_hh[, .(household_code, purchase_year)])
+grid_nt <- hh_years_nt[,
+  .(purchase_month = seq(
+      as.IDate(paste0(purchase_year, "-01-01")),
+      as.IDate(paste0(purchase_year, "-12-01")),
+      by = "1 month"
+    )),
+  by = .(household_code, purchase_year)
+]
+
+# Merge demographics onto month grid
+dt_nt_monthly <- merge(grid_nt, dt_non_tobacco_hh, by = c("household_code", "purchase_year"), all.x = TRUE)
+setorder(dt_nt_monthly, household_code, purchase_year, purchase_month)
+
+# Forward then backward fill demographics within household across years
+list_hh_cols_nt <- setdiff(names(dt_non_tobacco_hh), c("household_code", "purchase_year"))
+dt_nt_monthly[, (list_hh_cols_nt) := lapply(.SD, zoo::na.locf, na.rm = FALSE),
+              by = household_code, .SDcols = list_hh_cols_nt]
+dt_nt_monthly[, (list_hh_cols_nt) := lapply(.SD, function(x) zoo::na.locf(x, fromLast = TRUE, na.rm = FALSE)),
+              by = household_code, .SDcols = list_hh_cols_nt]
+
+# Set all purchase and consumption columns to zero
+list_zero_cols <- c(
+  "number_of_purchases", "number_of_unique_categories", "number_of_unique_segments",
+  "consumption_in_cigs", "consumption_in_packs",
+  "cig", "ecig", "cig_ecig",
+  "original_ecig", "flavored_ecig", "fda_authorized_ecig", "fda_flavored_ecig", "non_fda_flavored_ecig",
+  "total_packs", "cig_nicotine_mg_consumed", "cig_nicotine_mg_absorbed",
+  "total_mL", "total_original_mL", "total_flavored_mL", "total_fda_authorized_mL",
+  "total_fda_flavored_mL", "total_non_fda_flavored_mL",
+  "ecig_nicotine_mg_consumed", "ecig_nicotine_mg_absorbed",
+  "total_nicotine_mg_consumed", "total_nicotine_mg_absorbed"
+)
+dt_nt_monthly[, (list_zero_cols) := 0]
+dt_nt_monthly[, outside_option := 1]
+
+# Set all price columns to NA (no purchase observed, no price)
+list_na_cols <- c(
+  "total_price_paid", "total_pack_price_paid", "total_mL_price_paid",
+  "per_pack_price_paid", "per_mL_price_paid",
+  "real_per_pack_price_paid", "real_per_mL_price_paid"
+)
+dt_nt_monthly[, (list_na_cols) := NA_real_]
+
+# TYA indicators constant within household (same logic as tobacco households above)
+dt_nt_monthly[, teen_or_young_adult_ever := as.integer(
+  any(teen_or_young_adult_present == 1, na.rm = TRUE)
+), by = household_code]
+dt_nt_monthly[, teen_or_young_adult_always := as.integer(
+  all(teen_or_young_adult_present == 1, na.rm = TRUE)
+), by = household_code]
+
+# Stack tobacco and non-tobacco households into full population panel
+# fill = TRUE handles any column mismatches with NA
+dt_all_monthly <- rbind(dt_monthly, dt_nt_monthly, fill = TRUE)
+setorder(dt_all_monthly, household_code, purchase_month)
+
+
+#############################
+# Output full population
+# panel to a file
+#############################
+
+# Write the full population panel (tobacco + non-tobacco) to a file
+file_name_all_csv <- paste0("./all_panelists_purchases_monthly_CLEANED_2021-Onward.csv")
+file_name_all_rds <- paste0("./all_panelists_purchases_monthly_CLEANED_2021-Onward.rds")
+fwrite(dt_all_monthly, file_name_all_csv)
+saveRDS(dt_all_monthly, file_name_all_rds)
+
+# Confirm results have been written to a file
+if (file.exists(file_name_all_csv) & file.exists(file_name_all_rds))
+{
+  cat("Results have been written to\n", file_name_all_csv, "\nand\n", file_name_all_rds, "\n")
+} else
 {
   cat("Error: File could not be written\n")
 }

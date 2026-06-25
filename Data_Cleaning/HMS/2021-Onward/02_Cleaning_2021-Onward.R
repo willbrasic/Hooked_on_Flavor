@@ -187,7 +187,6 @@ list_purchases <- lapply(list_purchases, function(dt)
 })
 
 
-
 #############################
 # Clean cigarette purchase
 # data
@@ -308,7 +307,7 @@ list_purchases <- lapply(list_purchases, function(dt)
   
   # Consumption is in terms of packs and nicotine consumed/absorbed
   dt[cig == 1, `:=` (consumption_in_cigs = total_cigs,
-                     consumption_in_packs = total_packs, 
+                     consumption_in_packs = total_packs,
                      cig_nicotine_mg_consumed = total_packs * nicotine_mg_consumed_per_pack,
                      cig_nicotine_mg_absorbed = total_packs * nicotine_mg_absorbed_per_pack
                      )]
