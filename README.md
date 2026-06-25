@@ -49,9 +49,7 @@ Julia scripts are parallelized via `JULIA_NUM_THREADS` and are designed to run o
             ├── 02_Second_Stage_Estimation_Mixture_Holdout/
             ├── 03_Validation_Mixture/
             ├── 03_Validation_Mixture_Holdout/
-            ├── 04_CF_Mixture/
-            ├── 05_MC_Simulation_Mixture/
-            └── 06_Figure_Creation/
+            └── 04_CF_Mixture/
 ```
 
 ---
@@ -214,15 +212,3 @@ Policies analyzed:
 | `01_CF_Functions_Mixture.jl` | Counterfactual-specific functions: policy utility modifiers, tax application, revenue computation, and welfare calculation |
 | `02_CF_Mixture.jl` | Main counterfactual script. Loops over policies and discount factor specifications ($\beta \in \{0.70, 1.0\}$), solves the VFI under each regime, forward-simulates outcomes, and saves results by policy and household group |
 | `02_CF_Slurm_Mixture.sb` | SLURM submission script for counterfactual analysis on the HPC (94 cores, 24-hour wall time) |
-
----
-
-### `05_MC_Simulation_Mixture/`
-
-Monte Carlo parameter recovery study. Simulates data from the estimated model, re-estimates parameters on the simulated data, and assesses identification and finite-sample bias of the MLE.
-
----
-
-### `06_Figure_Creation/`
-
-Produces all counterfactual and model validation figures reported in the paper, including in-sample and holdout fit plots, counterfactual addiction stock trajectories by household type, welfare cost and tax revenue comparisons across policies, and extensive margin and habit stock impulse responses.
