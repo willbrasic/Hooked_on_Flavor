@@ -1,3 +1,11 @@
+# Repo scope — only Data_Cleaning/HMS/2021-Onward is tracked
+Data_Analysis/
+Data_Cleaning/HMS/2004-2020/
+Data_Cleaning/HMS/HMS_Flavor_Ban_DiD/
+CLAUDE.md
+tax_analysis.py
+LICENSE
+
 # Data files (tracked separately, too large for git)
 *.csv
 *.dta
@@ -16,7 +24,6 @@
 # Log files
 *.log
 *.txt
-!CLAUDE.md
 
 # R artifacts
 .Rhistory
