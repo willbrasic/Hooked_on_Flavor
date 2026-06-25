@@ -1,5 +1,8 @@
-# Repo scope — only Data_Cleaning/HMS/2021-Onward is tracked
-Data_Analysis/
+# Repo scope
+Data_Analysis/*
+!Data_Analysis/HMS/
+Data_Analysis/HMS/*
+!Data_Analysis/HMS/Structural_Model_Motivation/
 Data_Cleaning/HMS/2004-2020/
 Data_Cleaning/HMS/HMS_Flavor_Ban_DiD/
 CLAUDE.md
