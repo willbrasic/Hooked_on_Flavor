@@ -8,7 +8,7 @@ wbrasic97@gmail.com
 
 ## Overview
 
-This repository contains the code for a structural economics paper studying tobacco product demand with a focus on flavored e-cigarette regulation. The paper estimates a **K=3 finite mixture dynamic discrete choice model** of household tobacco demand using Nielsen Homescan (HMS) panel data from 2021 onward. The model captures addiction dynamics, habit formation, preference heterogeneity across latent household types, and the role of teens and young adults (TYA) in driving flavored e-cigarette adoption.
+This repository contains the code for [*Hooked on Flavor: Addiction, Present Bias, and the Consequences of E-Cigarette Flavor Policy*](https://williambrasic.com/Research/JMP_20260611.pdf), studying tobacco product demand with a focus on flavored e-cigarette regulation. The paper estimates a **K=3 finite mixture dynamic discrete choice model** of household tobacco demand using Nielsen Homescan (HMS) panel data from 2021 onward. The model captures addiction dynamics, habit formation, preference heterogeneity across latent household types, and the role of teens and young adults (TYA) in driving flavored e-cigarette adoption.
 
 The counterfactual analysis evaluates the welfare and public health effects of several FDA flavor regulation policies, including comprehensive flavor bans, FDA-authorized product restrictions, and per-mL flavor taxes.
 
