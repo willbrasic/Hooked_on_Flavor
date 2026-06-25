@@ -8,7 +8,7 @@ wbrasic97@gmail.com
 
 ## Overview
 
-This repository contains the replication code for a structural economics paper studying tobacco product demand with a focus on flavored e-cigarette regulation. The paper estimates a **K=3 finite mixture dynamic discrete choice model** of household tobacco demand using Nielsen Homescan (HMS) panel data from 2021 onward. The model captures addiction dynamics, habit formation, preference heterogeneity across latent household types, and the role of teens and young adults (TYA) in driving flavored e-cigarette adoption.
+This repository contains the code for a structural economics paper studying tobacco product demand with a focus on flavored e-cigarette regulation. The paper estimates a **K=3 finite mixture dynamic discrete choice model** of household tobacco demand using Nielsen Homescan (HMS) panel data from 2021 onward. The model captures addiction dynamics, habit formation, preference heterogeneity across latent household types, and the role of teens and young adults (TYA) in driving flavored e-cigarette adoption.
 
 The counterfactual analysis evaluates the welfare and public health effects of several FDA flavor regulation policies, including comprehensive flavor bans, FDA-authorized product restrictions, and per-mL flavor taxes.
 
@@ -16,11 +16,7 @@ The counterfactual analysis evaluates the welfare and public health effects of s
 
 ## Data
 
-The underlying data are from the **Nielsen Homescan (HMS) Consumer Panel** (2021 onward), a household-level longitudinal panel tracking retail purchases across product categories. The raw data are proprietary and not included in this repository. All scripts assume the cleaned panel data are available locally.
-
-Key datasets produced by the cleaning pipeline:
-- `all_panelists_purchases_monthly_CLEANED_2021-Onward.csv` — full household-month panel (all panelists)
-- `tobacco_panelists_purchases_monthly_CLEANED_2021-Onward.csv` — restricted to tobacco-purchasing households
+The underlying data are from the **Nielsen Homescan (HMS) Consumer Panel** (2021 onward), a household-level longitudinal panel tracking retail purchases across product categories. The raw data are proprietary and not included in this repository.
 
 ---
 
@@ -41,21 +37,21 @@ Julia scripts are parallelized via `JULIA_NUM_THREADS` and are designed to run o
 .
 ├── Data_Cleaning/
 │   └── HMS/
-│       └── 2021-Onward/               # Raw HMS data cleaning pipeline (R)
+│       └── 2021-Onward/                          # Raw HMS data cleaning pipeline (R)
 └── Data_Analysis/
     └── HMS/
-        ├── Summary_Stats/             # Descriptive statistics (R)
-        ├── Structural_Model_Motivation/  # Reduced-form evidence (R)
-        ├── Figure_Creation/           # Publication-ready figures (R)
-        └── Dynamic_Model/             # Structural estimation pipeline (Julia + R)
+        ├── Summary_Stats/                         # Descriptive statistics (R)
+        ├── Structural_Model_Motivation/           # Reduced-form evidence (R)
+        ├── Figure_Creation/                       # Publication-ready figures (R)
+        └── Dynamic_Model/                         # Structural estimation pipeline (Julia + R)
             ├── 01_First_Stage_Estimation/
             ├── 02_Second_Stage_Estimation_Mixture/
             ├── 02_Second_Stage_Estimation_Mixture_Holdout/
-            ├── 03_Validation_Mixture/          (coming soon)
-            ├── 03_Validation_Mixture_Holdout/  (coming soon)
-            ├── 04_CF_Mixture/                  (coming soon)
-            ├── 05_MC_Simulation_Mixture/       (coming soon)
-            └── 06_Figure_Creation/             (coming soon)
+            ├── 03_Validation_Mixture/
+            ├── 03_Validation_Mixture_Holdout/
+            ├── 04_CF_Mixture/
+            ├── 05_MC_Simulation_Mixture/
+            └── 06_Figure_Creation/
 ```
 
 ---
@@ -178,59 +174,55 @@ Estimates the structural model on the holdout sample for out-of-sample validatio
 
 ---
 
-### `03_Validation_Mixture/` *(coming soon)*
+### `03_Validation_Mixture/`
 
-Forward-simulates the estimated model to evaluate in-sample fit. Compares model-predicted market shares, addiction stock distributions, and choice transition patterns against the observed data.
+Forward-simulates the estimated model to evaluate in-sample fit. Observed prices and TYA states are held at their actual values while the addiction stock evolves endogenously from simulated choices. Compares model-predicted market shares, addiction stock distributions, and choice transition patterns against the observed data.
+
+| Script | Description |
+|--------|-------------|
+| `01_Validation_Functions_Mixture.jl` | Functions for forward simulation, market share aggregation, and fit diagnostics |
+| `02_Validation_Mixture.jl` | Main validation script: forward-simulates the model under the estimated parameters and outputs in-sample fit statistics and figures |
+| `02_Validation_Mixture_Slurm.sb` | SLURM submission script for validation on the HPC |
 
 ---
 
-### `03_Validation_Mixture_Holdout/` *(coming soon)*
+### `03_Validation_Mixture_Holdout/`
 
 Same as `03_Validation_Mixture/` but evaluated on the holdout sample, providing a genuine out-of-sample test of model fit.
 
+| Script | Description |
+|--------|-------------|
+| `01_Validation_Functions_Mixture.jl` | Same validation functions adapted for the holdout sample |
+| `02_Validation_Mixture.jl` | Holdout validation script |
+| `02_Validation_Mixture_Slurm.sb` | SLURM submission script for holdout validation |
+
 ---
 
-### `04_CF_Mixture/` *(coming soon)*
+### `04_CF_Mixture/`
 
-Counterfactual policy analysis. Solves the model under alternative regulatory regimes and simulates household behavior. Policies analyzed include:
+Counterfactual policy analysis. Re-solves the VFI under alternative regulatory regimes and forward-simulates household behavior to compute welfare effects, addiction stock trajectories, and tax revenue. Predicted choice probabilities are aggregated across latent types using mixture posterior weights (law of total probability).
+
+Policies analyzed:
 
 - **Comprehensive flavor ban**: removes all flavored e-cigarettes from the choice set
 - **FDA-authorized products only**: restricts the market to FDA-authorized (menthol/tobacco) e-cigarettes
-- **Non-FDA flavor ban**: bans only non-FDA-authorized flavored products (enforcement gap scenario)
-- **Per-mL flavor tax**: calibrates a tax $\tau^*$ that matches the addiction reduction of the comprehensive ban, then compares welfare costs and tax revenue across household types
+- **Non-FDA flavor ban**: bans only non-FDA-authorized flavored products, leaving the enforcement gap open
+- **Per-mL flavor tax**: calibrates a tax $\tau^*$ that matches the aggregate addiction reduction of the comprehensive ban across all households, then compares welfare costs and tax revenue
+
+| Script | Description |
+|--------|-------------|
+| `01_CF_Functions_Mixture.jl` | Counterfactual-specific functions: policy utility modifiers, tax application, revenue computation, and welfare calculation |
+| `02_CF_Mixture.jl` | Main counterfactual script. Loops over policies and discount factor specifications ($\beta \in \{0.70, 1.0\}$), solves the VFI under each regime, forward-simulates outcomes, and saves results by policy and household group |
+| `02_CF_Slurm_Mixture.sb` | SLURM submission script for counterfactual analysis on the HPC (94 cores, 24-hour wall time) |
 
 ---
 
-### `05_MC_Simulation_Mixture/` *(coming soon)*
+### `05_MC_Simulation_Mixture/`
 
 Monte Carlo parameter recovery study. Simulates data from the estimated model, re-estimates parameters on the simulated data, and assesses identification and finite-sample bias of the MLE.
 
 ---
 
-### `06_Figure_Creation/` *(coming soon)*
+### `06_Figure_Creation/`
 
-Produces all counterfactual and model validation figures reported in the paper, including:
-
-- In-sample fit plots (predicted vs. observed market shares)
-- Holdout validation plots
-- Counterfactual addiction stock trajectories by household type
-- Welfare cost and tax revenue comparisons across policies
-- Extensive margin (cessation) and habit stock impulse responses
-
----
-
-## Replication Order
-
-To replicate the analysis from scratch, run scripts in the following order:
-
-1. `Data_Cleaning/HMS/2021-Onward/` (01 → 04)
-2. `Data_Analysis/HMS/Summary_Stats/` (01 → 02)
-3. `Data_Analysis/HMS/Structural_Model_Motivation/` (01 → 06)
-4. `Data_Analysis/HMS/Dynamic_Model/01_First_Stage_Estimation/` (01 → 04)
-5. `Data_Analysis/HMS/Dynamic_Model/02_Second_Stage_Estimation_Mixture/` (02 → 03, HPC)
-6. `Data_Analysis/HMS/Dynamic_Model/02_Second_Stage_Estimation_Mixture_Holdout/` (02, HPC)
-7. `Data_Analysis/HMS/Dynamic_Model/03_Validation_Mixture/` (02, HPC)
-8. `Data_Analysis/HMS/Dynamic_Model/03_Validation_Mixture_Holdout/` (02, HPC)
-9. `Data_Analysis/HMS/Dynamic_Model/04_CF_Mixture/` (02, HPC)
-10. `Data_Analysis/HMS/Dynamic_Model/05_MC_Simulation_Mixture/` (02 → 03, HPC)
-11. `Data_Analysis/HMS/Figure_Creation/` and `Dynamic_Model/06_Figure_Creation/`
+Produces all counterfactual and model validation figures reported in the paper, including in-sample and holdout fit plots, counterfactual addiction stock trajectories by household type, welfare cost and tax revenue comparisons across policies, and extensive margin and habit stock impulse responses.
