@@ -327,6 +327,94 @@ for (var in names(vars))
 # FDA authorized ecig effect
 # on purchasing flavored ecigs
 # for household-months
+# containing cig or ecig
+# purchases (with TYA interaction)
+#############################
+
+# Variables used across all regressions (now includes fda_authorized_ecig)
+vars_all_fda_cig_ecig <- c(
+  "flavored_ecig",
+  "fda_authorized_ecig",
+  "teen_present",
+  "young_adult_present",
+  "teen_or_young_adult_present",
+  "household_size",
+  "purchase_month",
+  "fips_state_code"
+)
+
+# Restrict to complete cases on required variables
+dt_complete_fda_cig_ecig <- dt_cig_ecig[complete.cases(dt_cig_ecig[, ..vars_all_fda_cig_ecig])]
+
+# Different LPM RHS variables
+vars_fda_cig_ecig <- list(
+  teen_present = list(label = "HH Contains a Teen", table = "fda_cig_ecig_teen_regression"),
+  young_adult_present = list(label = "HH Contains a Young Adult", table = "fda_cig_ecig_youngadult_regression"),
+  teen_or_young_adult_present = list(label = "HH Contains a Teen or Young Adult", table = "fda_cig_ecig_teen_youngadult_regression")
+)
+
+# Loop over each RHS variable
+for (var in names(vars_fda_cig_ecig))
+{
+  # (1) Baseline: fda_authorized_ecig + var + interaction + month FE
+  formula_1 <- as.formula(paste0("flavored_ecig ~ fda_authorized_ecig * ", var, " + i(purchase_month)"))
+  model_1 <- plm(formula_1, index = c("household_code", "purchase_month"), model = "pooling", data = dt_complete_fda_cig_ecig)
+
+  # (2) Add household size
+  formula_2 <- as.formula(paste0("flavored_ecig ~ fda_authorized_ecig * ", var, " + household_size + i(purchase_month)"))
+  model_2 <- plm(formula_2, index = c("household_code", "purchase_month"), model = "pooling", data = dt_complete_fda_cig_ecig)
+
+  # (3) Add state FE
+  formula_3 <- as.formula(paste0("flavored_ecig ~ fda_authorized_ecig * ", var, " + household_size + i(fips_state_code) + i(purchase_month)"))
+  model_3 <- plm(formula_3, index = c("household_code", "purchase_month"), model = "pooling", data = dt_complete_fda_cig_ecig)
+
+  # Cluster-robust variance-covariance matrix
+  V1 <- vcovHC(model_1, type = "HC1", cluster = "group")
+  V2 <- vcovHC(model_2, type = "HC1", cluster = "group")
+  V3 <- vcovHC(model_3, type = "HC1", cluster = "group")
+
+  # Interaction term name (R uses : for interaction terms from * expansion)
+  interaction_name <- paste0("fda_authorized_ecig:", var)
+
+  # Variables to keep in the table
+  keep_vars <- c("fda_authorized_ecig", var, interaction_name, "household_size")
+
+  # Get robust SEs for those variables in the table
+  robust_1 <- get_robust(model_1, V1, keep_vars)
+  robust_2 <- get_robust(model_2, V2, keep_vars)
+  robust_3 <- get_robust(model_3, V3, keep_vars)
+
+  # FE indicators
+  add_lines <- list(
+    c("State Fixed Effects", "", "", "$\\checkmark$"),
+    c("Month Fixed Effects", "$\\checkmark$", "$\\checkmark$", "$\\checkmark$")
+  )
+
+  # Generate table
+  stargazer(
+    model_1, model_2, model_3,
+    type = "latex",
+    keep = keep_vars,
+    se = list(robust_1$se, robust_2$se, robust_3$se),
+    p  = list(robust_1$p,  robust_2$p,  robust_3$p),
+    dep.var.labels = "Purchased Flavored E-Cigarette",
+    column.labels = c("(1)", "(2)", "(3)"),
+    covariate.labels = c("FDA Authorized E-Cig", vars_fda_cig_ecig[[var]]$label,
+                         paste0("FDA Authorized $\\times$ ", vars_fda_cig_ecig[[var]]$label), "HH Size"),
+    omit.stat = c("f", "ser"),
+    add.lines = add_lines,
+    keep.stat = c("n", "rsq"),
+    no.space = TRUE,
+    digits = 3,
+    label = vars_fda_cig_ecig[[var]]$table
+  )
+}
+
+
+#############################
+# FDA authorized ecig effect
+# on purchasing flavored ecigs
+# for household-months
 # containing ecig purchases
 # (with TYA interaction)
 #############################
