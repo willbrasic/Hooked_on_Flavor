@@ -326,7 +326,8 @@ for (var in names(vars))
 #############################
 # FDA authorized ecig effect
 # on purchasing flavored ecigs
-# for all household-months
+# for household-months
+# containing ecig purchases
 # (with TYA interaction)
 #############################
 
@@ -343,7 +344,7 @@ vars_all_fda <- c(
 )
 
 # Restrict to complete cases on required variables
-dt_complete_fda <- dt[complete.cases(dt[, ..vars_all_fda])]
+dt_complete_fda <- dt_ecig[complete.cases(dt_ecig[, ..vars_all_fda])]
 
 # Different LPM RHS variables
 vars_fda <- list(
