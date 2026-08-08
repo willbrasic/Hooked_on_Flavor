@@ -1,4 +1,4 @@
-# Hookd on Flavor: Addiction, Present Bias, and the Consequences of E-Cigarette Flavor Policy
+# Hooked on Flavor: Addiction, Present Bias, and the Consequences of E-Cigarette Flavor Policy
 
 **William Brasic**  
 Department of Economics, University of Arizona  
