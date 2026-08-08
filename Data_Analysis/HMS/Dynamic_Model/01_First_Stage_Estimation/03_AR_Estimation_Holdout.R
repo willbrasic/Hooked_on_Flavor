@@ -5,12 +5,7 @@
 # June 2026
 #
 # This script obtains the AR(1) parameters used for state-transitions
-# in the holdout estimation. Estimated on ALL households x 2021-2022
-# monthly median prices only (no 2023 data).
-#
-# AR parameters are written to AR_Parameters_Holdout/ so that
-# 04_Price_State_Transitions_Holdout.R reads the correct parameters when
-# generating holdout Halton draw transitions.
+# in the holdout estimation. 
 ################################################################################
 
 

@@ -6,9 +6,8 @@
 #
 # This script prepares holdout data for out-of-sample model evaluation.
 #
-# Strategy: temporal hold-out.
-#   - Estimation sample: ALL households x 2021-2022
-#   - Validation sample: overlap households x 2023 (separate script)
+# Estimation sample: ALL households x 2021-2022
+# Validation sample: overlap households x 2023 
 #
 # Overlap households are those present in both 2021-2022 AND 2023. The full
 # 2021-2022 sample is used for estimation so that parameters are not restricted

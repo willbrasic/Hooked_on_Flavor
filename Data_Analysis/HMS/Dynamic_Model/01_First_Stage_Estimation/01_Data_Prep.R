@@ -809,7 +809,6 @@ if (file.exists(file_name))
 
 # Compute price ratios: median per-unit price in each bin / overall category median
 # Small-quantity bins pay more per unit, large-quantity bins pay less (quantity discounts)
-# Ratios are fixed constants used in the expenditure computation (get_expenditures() in Julia)
 
 # Overall category medians (across all purchasers regardless of quantity bin)
 overall_cig_price  <- dt[total_packs > 0, median(real_per_pack_price_paid, na.rm = TRUE)]
@@ -902,7 +901,7 @@ dt_lag[, lagged_cig_ecig := fifelse(lagged_category == 3, 1, 0)]
 cat("Observations with no lagged choice:", dt_lag[is.na(lagged_category), .N], "\n")
 cat("Observations with lagged choice:", dt_lag[!is.na(lagged_category), .N], "\n")
 
-# Keep only the lagged indicators (order matches dt rows)
+# Keep only the lagged indicators 
 dt_lagged_choice <- dt_lag[, .(lagged_cig, lagged_ecig, lagged_cig_ecig)]
 
 # Write the data to a file
