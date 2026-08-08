@@ -5,9 +5,7 @@
 # June 2026
 #
 # This script uses Halton draws to simulate price state-transitions for the
-# holdout estimation. Uses holdout AR parameters (AR_Parameters_Holdout/) and
-# holdout pricing spaces (Data_Holdout/Pricing_Spaces.csv).
-# Writes Halton_Draw_Shocks.csv and Halton_Draw_Transitions.csv to Data_Holdout/.
+# holdout estimation. 
 ################################################################################
 
 
