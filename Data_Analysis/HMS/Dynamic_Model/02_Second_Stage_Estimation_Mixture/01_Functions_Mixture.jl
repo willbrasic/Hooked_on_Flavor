@@ -6,16 +6,6 @@
 #
 # This script creates the necessary functions to estimate the dynamic model.
 # Functions are ordered by their execution sequence in 02_Estimation.jl.
-#
-# K = 3 Finite Mixture 
-#
-# Common params (13): α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E
-# Type k (3 each):    ξ_C_k, ξ_E_k, ξ_CE_k  (k = 1, 2, 3)
-# Mixing (4):         π_0_2 (type 2 baseline logit), π_TYA_2 (type 2 TYA shifter),
-#                     π_0_3 (type 3 baseline logit), π_TYA_3 (type 3 TYA shifter)
-#
-# For each type k, get_flow_utility receives a 16-element vector:
-#   [common_params, type_k] = [α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E, ξ_C_k, ξ_E_k, ξ_CE_k]
 ################################################################################
 
 
@@ -937,13 +927,13 @@ end
 Pre-compute price transition interpolation brackets and weights for bilinear
 interpolation of the value function over predicted next-period prices.
 
-The interpolation weights are for the upper term.
+The interpolation weights are for the upper term (so 1 - w is the weight for the lower term)
 
 For each current combined price state m and Halton draw r, the predicted
 next-period prices T[m, r, :] are bracketed on each category's 1D price grid.
 Out-of-bounds predictions are clamped to the grid endpoints. The function works as follows:
 - If T[m, r, k] < lower bound, assign predicted price to the lower bound
-- If T[m, r, k] is in the grid, no change
+- If T[m, r, k] is in the grid, no change (so use the weights as normal)
 - If T[m, r, k] > upper bound, assign predicted price to the upper bound
 
 The searchsortedfirst function takes in the grid for the first argument and the point
@@ -1027,7 +1017,7 @@ Combined grid ordering follows 04_State_Transitions.R:
 where cig_idx varies slowly and ecig_idx varies fast.
 
 Returns:
-- p_state:      Vector{Int} of combined price grid indices for each observation
+- p_state:      Vector of combined price grid indices for each observation
 - p_continuous: N × 2 matrix of representative (cig, ecig) prices for likelihood interpolation
 - P_obs_cig:    N × N_J matrix of actual cig price for each obs-alternative pair (0 if no cig component)
 - P_obs_ecig:   N × N_J matrix of actual ecig price for each obs-alternative pair (0 if no ecig component)
@@ -1214,7 +1204,7 @@ price state p, and TYA state is:
 Bundles (cat 5-7) get BOTH price terms.
 For the outside option (j = 1), all terms except γ_1·a and γ_4·a_flav are zero.
 
-θ is a 16-element vector: [α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E, ξ_C, ξ_E, ξ_CE].
+θ = [α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E, ξ_C, ξ_E, ξ_CE].
 
 
 Two-stock addiction model: the addiction level entering utility is the unweighted
@@ -1397,9 +1387,7 @@ Estimate initial addiction stock for each household via fixed-point iteration.
 Starting from a₀ = 0, simulates the addiction trajectory forward using observed
 choices, then sets a₀ to the terminal addiction level. Repeats until convergence.
 
-Convergence is guaranteed because the law of motion ã' = (1-ψ)ã + ψn is a
-contraction in a₀: the influence of a₀ on a_t decays b/c (1-ψ)^t.
-See paper appendix for details.
+Convergence is guaranteed; see paper appendix for proof.
 
 Returns:
 - a₀: Dict mapping household_code → estimated initial addiction stock
@@ -1726,10 +1714,9 @@ function recompute_choice_values!(
                     EV_sss_2 += w_ll * V_now[2, hi_af, hi_as, hi_aflav, p_ll] + w_lh * V_now[2, hi_af, hi_as, hi_aflav, p_lh] + w_hl * V_now[2, hi_af, hi_as, hi_aflav, p_hl] + w_hh * V_now[2, hi_af, hi_as, hi_aflav, p_hh]
                 end
 
-                # Average over Halton draws (multiply by 1/R) and trilinearly interpolate
+                # Average over Halton draws (multiply by 1/R) and interpolate
                 # across the 8 addiction bracket corners using weights w_af, w_as, and w_aflav.
                 # Result: E[V(tya, af', as', aflav', p') | af, as, aflav, p, j] for each TYA state
-                # No TYA transition integration; each TYA state uses its own continuation value.
                 EV_1 = (1-w_af)*(1-w_as)*(1-w_aflav)*(EV_fff_1*inv_R) + (1-w_af)*(1-w_as)*w_aflav*(EV_ffs_1*inv_R) + (1-w_af)*w_as*(1-w_aflav)*(EV_fsf_1*inv_R) + (1-w_af)*w_as*w_aflav*(EV_fss_1*inv_R) + w_af*(1-w_as)*(1-w_aflav)*(EV_sff_1*inv_R) + w_af*(1-w_as)*w_aflav*(EV_sfs_1*inv_R) + w_af*w_as*(1-w_aflav)*(EV_ssf_1*inv_R) + w_af*w_as*w_aflav*(EV_sss_1*inv_R)
                 EV_2 = (1-w_af)*(1-w_as)*(1-w_aflav)*(EV_fff_2*inv_R) + (1-w_af)*(1-w_as)*w_aflav*(EV_ffs_2*inv_R) + (1-w_af)*w_as*(1-w_aflav)*(EV_fsf_2*inv_R) + (1-w_af)*w_as*w_aflav*(EV_fss_2*inv_R) + w_af*(1-w_as)*(1-w_aflav)*(EV_sff_2*inv_R) + w_af*(1-w_as)*w_aflav*(EV_sfs_2*inv_R) + w_af*w_as*(1-w_aflav)*(EV_ssf_2*inv_R) + w_af*w_as*w_aflav*(EV_sss_2*inv_R)
 
@@ -1762,19 +1749,11 @@ Each iteration computes two choice-specific value functions:
   V_d[tya, j, a, p] = U[tya, j, a, p] + β·δ · EV[tya, a'(j,a), p]
   V_e[tya, j, a, p] = U[tya, j, a, p] +   δ · EV[tya, a'(j,a), p]
 
-where:
-  - U[tya, j, a, p] is the deterministic flow utility of choosing alternative j
-    in state (tya, a, p), precomputed outside VFI
-  - a'(j, a) is the next-period addiction state from choosing j at addiction a,
-    given by ã' = (1-ψ)·ã + ψ·n[j], interpolated onto the addiction grid
-  - EV is the expected continuation value, integrating over stochastic price
-    transitions using R Halton draws 
-
 V_d and V_e share the *same* EV term. The only difference is the discount
 factor applied to it (β·δ vs δ). The continuation value V is what *will
 actually happen*, and the sophisticated agent correctly predicts this.
 
-# Continuation Value (Sophisticated Aggregation)
+# Continuation Value
 The ex-ante state value V aggregates over alternatives using decision-utility
 choice probabilities applied to experienced-utility payoffs:
 
@@ -1784,18 +1763,11 @@ where:
   - p_j = softmax(V_d)_j = exp(V_d_j) / Σ_k exp(V_d_k) are the choice
     probabilities from the T1EV logit assumption, computed from decision utility
   - H(p) = -Σ_j p_j · log(p_j) is the entropy bonus from the T1EV error
-    distribution (the option value of randomness)
+    distribution 
 
 This says: the future self chooses with probs p_j (based on present-biased V_d),
 but the actual payoff from each choice is V_e (not V_d). The entropy term accounts
 for the fact that the T1EV shocks create randomness that has positive expected value.
-
-# Why V = Σ p_j V_e_j + H(p) and not logsumexp(V_e)?
-Under standard exponential discounting (β = 1), the agent chooses to maximize
-V_e, so the expected max is logsumexp(V_e) by the T1EV formula. But when β < 1,
-the agent chooses to maximize V_d ≠ V_e. The choice probabilities come from V_d,
-not V_e, so the standard logsumexp formula does not apply. Instead we must
-manually compute the expected payoff: probability-weighted V_e plus entropy.
 
 # When β = 1 (Standard Exponential Discounting)
 V_d = V_e (since β·δ = δ), so p_j = softmax(V_e)_j. In this case:
@@ -1813,7 +1785,7 @@ stochastic price transitions:
 where p'_r is the realized next-period price vector from Halton draw r, starting
 from current price state p. TYA is a binary observable indicator (no transitions),
 so the continuation value for TYA=t only depends on V[t, ...] (same TYA state).
-Since a' and p' are generally off-grid, we interpolate:
+Since a' and p' are generally off-grid, I interpolate:
   - Addiction dimension: trilinear interpolation between grid brackets (af, as, aflav)
   - Price dimensions: bilinear interpolation over the 2D (cig × ecig) price grid
     using four corner points (p_ll, p_lh, p_hl, p_hh)
@@ -1829,8 +1801,10 @@ then V_now is replaced with V_next.
 # Post-Convergence Recomputation
 After convergence, V_d is recomputed one final time from the converged V_now.
 This ensures the returned V_decision is exactly consistent with the fixed point,
-rather than being one iteration stale (since V_d was last computed *before*
+rather than being one iteration behind (since V_d was last computed *before*
 the final V_now update).
+
+# FOR FURTHER DETAILS, SEE PAPER APPENDIX
 
 Returns
     - V:          Converged ex-ante value function, V[tya_idx, af_idx, as_idx, aflav_idx, p_idx]
@@ -2057,7 +2031,7 @@ function solve_vfi_sophisticated(
             break
         end
 
-        # Report if we hit the maximum number of iterations without converging
+        # Report if I hit the maximum number of iterations without converging
         if iter == max_iter
             elapsed = time() - t_vfi
             log_msg("")
@@ -2067,7 +2041,7 @@ function solve_vfi_sophisticated(
 
     # During the last VFI iteration, V_d was computed using V_now from the
     # *previous* iteration, but V_now was then updated to V_next. V_d is
-    # therefore one iteration stale relative to the converged V_now.
+    # therefore one iteration behind relative to the converged V_now.
     # Recompute V_d one final time using the converged V_now to ensure
     # exact consistency: V_d = U + βδ · EV(V_now_converged).
     recompute_choice_values!(
@@ -2181,7 +2155,7 @@ function interpolate_v_choice(
     w_ssf = w_af * w_as * (1 - w_aflav)
     w_sss = w_af * w_as * w_aflav
 
-    # 5-linear interpolation for all alternatives
+    # Interpolation for all alternatives
     v_interp = Vector{Float64}(undef, N_J)
 
     for j in 1:N_J
@@ -2204,12 +2178,116 @@ function interpolate_v_choice(
 end
 
 
+"""
+5-linearly interpolate the sophisticated-agent value function V_now (no alternative
+dimension) at a continuous state (af, as, aflav, p_cig, p_ecig).
+
+Returns:
+- v_interp: interpolated V_now scalar at the given continuous state
+"""
+function interpolate_v_now(
+    V_now::Array{Float64, 5},
+    tya_idx::Integer,
+    af::Real,
+    as::Real,
+    aflav::Real,
+    obs_cig::Real,
+    obs_ecig::Real,
+    N_P::Integer,
+    A_f::AbstractVector{<:Real},
+    A_s::AbstractVector{<:Real},
+    A_flav::AbstractVector{<:Real},
+    P::AbstractMatrix{<:Real}
+)
+
+    # Number of addiction grid points
+    N_A_f = length(A_f)
+    N_A_s = length(A_s)
+    N_A_flav = length(A_flav)
+
+    # 1D price grids
+    P_cig  = @view P[:, 1]
+    P_ecig = @view P[:, 2]
+
+    # Clamp continuous fast addiction to grid bounds
+    af_i = clamp(af, A_f[1], A_f[end])
+    hi_af = clamp(searchsortedfirst(A_f, af_i), 1, N_A_f)
+    lo_af = clamp(hi_af - 1, 1, N_A_f)
+    w_af = (lo_af == hi_af) ? 0.0 : (af_i - A_f[lo_af]) / (A_f[hi_af] - A_f[lo_af])
+
+    # Clamp continuous slow addiction to grid bounds
+    as_i = clamp(as, A_s[1], A_s[end])
+    hi_as = clamp(searchsortedfirst(A_s, as_i), 1, N_A_s)
+    lo_as = clamp(hi_as - 1, 1, N_A_s)
+    w_as = (lo_as == hi_as) ? 0.0 : (as_i - A_s[lo_as]) / (A_s[hi_as] - A_s[lo_as])
+
+    # Clamp continuous flavored habit to grid bounds
+    aflav_i = clamp(aflav, A_flav[1], A_flav[end])
+    hi_aflav = clamp(searchsortedfirst(A_flav, aflav_i), 1, N_A_flav)
+    lo_aflav = clamp(hi_aflav - 1, 1, N_A_flav)
+    w_aflav = (lo_aflav == hi_aflav) ? 0.0 : (aflav_i - A_flav[lo_aflav]) / (A_flav[hi_aflav] - A_flav[lo_aflav])
+
+    # Clamp continuous prices to grid bounds
+    cig_clamped  = clamp(obs_cig, P_cig[1], P_cig[end])
+    ecig_clamped = clamp(obs_ecig, P_ecig[1], P_ecig[end])
+
+    # Cigarette price brackets
+    hi_c = clamp(searchsortedfirst(P_cig, cig_clamped), 1, N_P)
+    lo_c = clamp(hi_c - 1, 1, N_P)
+    w_c  = (lo_c == hi_c) ? 0.0 : (cig_clamped - P_cig[lo_c]) / (P_cig[hi_c] - P_cig[lo_c])
+
+    # E-cigarette price brackets
+    hi_e = clamp(searchsortedfirst(P_ecig, ecig_clamped), 1, N_P)
+    lo_e = clamp(hi_e - 1, 1, N_P)
+    w_e  = (lo_e == hi_e) ? 0.0 : (ecig_clamped - P_ecig[lo_e]) / (P_ecig[hi_e] - P_ecig[lo_e])
+
+    # Combined price grid indices for bilinear interpolation (4 corners)
+    p_ll = (lo_c - 1) * N_P + lo_e
+    p_lh = (lo_c - 1) * N_P + hi_e
+    p_hl = (hi_c - 1) * N_P + lo_e
+    p_hh = (hi_c - 1) * N_P + hi_e
+
+    # Bilinear price weights
+    w_ll = (1 - w_c) * (1 - w_e)
+    w_lh = (1 - w_c) * w_e
+    w_hl = w_c * (1 - w_e)
+    w_hh = w_c * w_e
+
+    # 8 addiction corner weights (trilinear over fast × slow × flavored)
+    w_fff = (1 - w_af) * (1 - w_as) * (1 - w_aflav)
+    w_ffs = (1 - w_af) * (1 - w_as) * w_aflav
+    w_fsf = (1 - w_af) * w_as * (1 - w_aflav)
+    w_fss = (1 - w_af) * w_as * w_aflav
+    w_sff = w_af * (1 - w_as) * (1 - w_aflav)
+    w_sfs = w_af * (1 - w_as) * w_aflav
+    w_ssf = w_af * w_as * (1 - w_aflav)
+    w_sss = w_af * w_as * w_aflav
+
+    # Bilinear price interpolation at each of the 8 addiction corners
+    v_fff = w_ll * V_now[tya_idx, lo_af, lo_as, lo_aflav, p_ll] + w_lh * V_now[tya_idx, lo_af, lo_as, lo_aflav, p_lh] + w_hl * V_now[tya_idx, lo_af, lo_as, lo_aflav, p_hl] + w_hh * V_now[tya_idx, lo_af, lo_as, lo_aflav, p_hh]
+    v_ffs = w_ll * V_now[tya_idx, lo_af, lo_as, hi_aflav, p_ll] + w_lh * V_now[tya_idx, lo_af, lo_as, hi_aflav, p_lh] + w_hl * V_now[tya_idx, lo_af, lo_as, hi_aflav, p_hl] + w_hh * V_now[tya_idx, lo_af, lo_as, hi_aflav, p_hh]
+    v_fsf = w_ll * V_now[tya_idx, lo_af, hi_as, lo_aflav, p_ll] + w_lh * V_now[tya_idx, lo_af, hi_as, lo_aflav, p_lh] + w_hl * V_now[tya_idx, lo_af, hi_as, lo_aflav, p_hl] + w_hh * V_now[tya_idx, lo_af, hi_as, lo_aflav, p_hh]
+    v_fss = w_ll * V_now[tya_idx, lo_af, hi_as, hi_aflav, p_ll] + w_lh * V_now[tya_idx, lo_af, hi_as, hi_aflav, p_lh] + w_hl * V_now[tya_idx, lo_af, hi_as, hi_aflav, p_hl] + w_hh * V_now[tya_idx, lo_af, hi_as, hi_aflav, p_hh]
+    v_sff = w_ll * V_now[tya_idx, hi_af, lo_as, lo_aflav, p_ll] + w_lh * V_now[tya_idx, hi_af, lo_as, lo_aflav, p_lh] + w_hl * V_now[tya_idx, hi_af, lo_as, lo_aflav, p_hl] + w_hh * V_now[tya_idx, hi_af, lo_as, lo_aflav, p_hh]
+    v_sfs = w_ll * V_now[tya_idx, hi_af, lo_as, hi_aflav, p_ll] + w_lh * V_now[tya_idx, hi_af, lo_as, hi_aflav, p_lh] + w_hl * V_now[tya_idx, hi_af, lo_as, hi_aflav, p_hl] + w_hh * V_now[tya_idx, hi_af, lo_as, hi_aflav, p_hh]
+    v_ssf = w_ll * V_now[tya_idx, hi_af, hi_as, lo_aflav, p_ll] + w_lh * V_now[tya_idx, hi_af, hi_as, lo_aflav, p_lh] + w_hl * V_now[tya_idx, hi_af, hi_as, lo_aflav, p_hl] + w_hh * V_now[tya_idx, hi_af, hi_as, lo_aflav, p_hh]
+    v_sss = w_ll * V_now[tya_idx, hi_af, hi_as, hi_aflav, p_ll] + w_lh * V_now[tya_idx, hi_af, hi_as, hi_aflav, p_lh] + w_hl * V_now[tya_idx, hi_af, hi_as, hi_aflav, p_hl] + w_hh * V_now[tya_idx, hi_af, hi_as, hi_aflav, p_hh]
+
+    # Trilinear interpolation over addiction
+    v_interp = w_fff * v_fff + w_ffs * v_ffs + w_fsf * v_fsf + w_fss * v_fss + w_sff * v_sff + w_sfs * v_sfs + w_ssf * v_ssf + w_sss * v_sss
+
+    return v_interp
+end
+
+
 
 """
 Pre-compute contiguous household index ranges from a sorted household code vector.
 
-Assumes hh_codes are sorted so that all observations for the same household
-are contiguous. Returns a vector of (start, stop) pairs, one per household.
+NOTE: Assumes hh_codes are sorted so that all observations for the same household
+are contiguous. 
+
+Returns a vector of (start, stop) pairs, one per household.
 Called once before estimation; the result is passed to log_likelihood_mixture()
 to avoid recomputing every evaluation.
 
@@ -2304,13 +2382,13 @@ function log_likelihood_mixture(
 
         # Compute household-specific log mixing weights via K=3 softmax.
         # Type 1 is the reference. Types 2 and 3 have
-        # household-specific logit indices that shift their mixing probabilities.
+        # household-specific TYA weights that shift their mixing probabilities.
         #
-        # Step 1: Compute logit indices for types 2 and 3.
+        # Step 1: Compute logit probs for types 2 and 3.
         logit_2_h = π_0_2 + π_TYA_2 * tya_share_hh[h]
         logit_3_h = π_0_3 + π_TYA_3 * tya_share_hh[h]
 
-        # Step 2: Convert logit indices to log mixing probabilities via softmax.
+        # Step 2: Convert logit probs to log mixing probabilities via softmax.
         # logsumexp([0.0, logit_2_h, logit_3_h]) is numerically stable and avoids
         # overflow/underflow.
         #   log π_1_h = 0 - log_denom_h = -log_denom_h
@@ -2322,8 +2400,8 @@ function log_likelihood_mixture(
         log_π_3_h   = logit_3_h - log_denom_h
 
         # Step 3: Compute per-type log-likelihood for this household.
-        # For each type k, we ask: "How well does type k's value function explain
-        # this household's entire purchase history?" We sum the log choice probability
+        # For each type k, I ask: "How well does type k's value function explain
+        # this household's entire purchase history?" I sum the log choice probability
         # across all of the household's observed months:
         #   log L_k(h) = Σ_t log P(y_ht | state_ht; θ_k)
         # A type whose ξ values better match this household's purchasing pattern
@@ -2388,7 +2466,7 @@ function log_likelihood_mixture(
         # Step 4: Integrate over types via logsumexp. This marginalizes over the
         # unobserved type. The model never commits a household to one type.
         # Conceptually: L_h = π_1_h·L_1(h) + π_2_h·L_2(h) + π_3_h·L_3(h), i.e.,
-        # the weighted average likelihood across all three types. We compute this in
+        # the weighted average likelihood across all three types. I compute this in
         # log space to avoid underflow when L_k(h) is a product of many small probs.
         mix_terms = [log_π_1_h + log_ll_k[1], log_π_2_h + log_ll_k[2], log_π_3_h + log_ll_k[3]]
         LL += logsumexp(mix_terms)
@@ -2423,9 +2501,7 @@ accumulating probabilities. Whichever interval u lands in determines the choice:
   - u = 0.85 → cumulative passes 0.2 and 0.7 (skip both), hits 1.0 at j=3, so return j=3
 
 Each alternative is chosen with probability equal to its interval width, which
-is exactly probs[j]. The fallback `return length(probs)` at the end handles
-the edge case where floating-point rounding makes the probabilities sum to
-0.9999... instead of exactly 1.0, so u could slightly exceed the accumulated sum.
+is exactly probs[j].
 
 Returns:
 - Sampled category index j ∈ {1, ..., length(probs)}
@@ -2480,7 +2556,7 @@ end
 θ_lower_bound = Float64[      0.0,  0.0, -Inf, -Inf,  -Inf,  -Inf,  -Inf,  -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf,  -Inf,  -Inf, -Inf,  -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf]
 θ_upper_bound = Float64[      Inf,  Inf,  Inf,  Inf,   Inf,   Inf,   Inf,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  Inf,  Inf,   Inf,   Inf,  Inf,   Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf]
 
-# Append ψ_3 bounds when estimating it (length guard prevents double-push on re-include)
+# Append ψ_3 bounds when estimating it
 if @isdefined(ESTIMATE_PSI_3) && ESTIMATE_PSI_3 && length(θ_lower_bound) == 26
     push!(θ_lower_bound, 0.01)   # ψ_3 > 0
     push!(θ_upper_bound, 0.99)   # ψ_3 < 1
@@ -2721,9 +2797,6 @@ function random_amoeba(
         # Decay schedule: this_add ∝ add × inner_shrink^(m-1)
         #   m = 1:  1.00 × add  (full exploration)
         #   m = M:  0.10 × add  (fine-grained search)
-        #
-        # inner_shrink is computed so that inner_shrink^(M-1) = add_min_frac.
-        # Combined with U(0.5, 2.0) random scaling for simplex shape diversity.
         add_min_frac = 0.10
         inner_shrink = add_min_frac^(1 / max(M - 1, 1))
 
@@ -2792,9 +2865,6 @@ function random_amoeba(
             end
 
             # Decay simplex deviations for next inner try.
-            # Exponential decay: add × inner_shrink^m, with U(0.5, 2.0) random
-            # scaling for simplex shape diversity. At m=1 (after first inner try),
-            # deviations are ~inner_shrink × add; at m=M, ~add_min_frac × add.
             this_add = add .* inner_shrink^m .* (0.5 .+ 1.5 .* rand(N_params))
 
             # Perturb starting point for next inner try using the decayed simplex
@@ -2922,27 +2992,22 @@ end
 """
 Objective function for the optimizer.
 
-Takes a parameter vector θ_vec (26 structural params for K=3 mixture, 27 when ESTIMATE_PSI_3=true),
+Takes a parameter vector θ_vec 
 recomputes flow utility and value function, evaluates the log-likelihood,
 and returns the negative log-likelihood.
 
-Increments `est_eval_count` and times each evaluation. **Box constraints:**
-returns `1e14` penalty if any parameter violates bounds via `check_parameter_bounds`.
+Increments `est_eval_count` and times each evaluation. 
+
+**Box constraints:** returns `1e14` penalty if any parameter violates bounds via `check_parameter_bounds`.
 
 For each candidate θ:
-  (1) computes flow utility U (6D: TYA × alternatives × fast addiction × slow addiction × flavored habit × price)
-  (2) solves VFI using pre-computed addiction transitions (fast, slow, flavored habit)
+  (1) computes flow utility U 
+  (2) solves VFI using pre-computed addiction transitions 
   (3) evaluates log-likelihood 
-  (4) returns the negative log-likelihood (since we minimize)
- 
-K=3 mixture objective: extracts common params (positions 1-13), type-specific ξ
-(14-16, 17-19, and 20-22), π_0_2 (23), π_TYA_2 (24), π_0_3 (25), and π_TYA_3 (26).
-Solves 3 VFI problems in parallel via Threads.@spawn (one per type, each internally
-using Threads.@threads over N_Pcomb×N_A_s×N_A_flav state triples), then evaluates
-the mixture log-likelihood with household-specific mixing weights:
-π_logit_k_h = π_0_k + π_TYA_k · tya_share_h.
+  (4) returns the negative log-likelihood (since I minimize)
 
-Fixed parameters: ψ_2 = 0.90, ψ_1 = 0.10, β = 1.0, δ = 0.99.
+
+Fixed parameters: ψ_2 = 0.90, ψ_1 = 0.10, δ = 0.99.
 
 Accesses global data loaded by 02_Estimation.jl (e.g., N_J, y, hh_ranges, etc.)
 so none of it needs to be passed as arguments.
@@ -2954,7 +3019,6 @@ function should_print_eval(eval_num::Integer)
 
     return eval_num <= 10 || eval_num % 50 == 0
 end
-
 
 function objective(θ_vec::AbstractVector{<:Real})
 
@@ -2977,7 +3041,6 @@ function objective(θ_vec::AbstractVector{<:Real})
         log_msg("")
     end
 
-    # Economic parameter bounds check
     # If any parameter falls outside their respective bounds, return penalty (very large number for LL)
     in_bounds, violations = check_parameter_bounds(θ_vec, est_param_names)
     if !in_bounds
@@ -2989,7 +3052,7 @@ function objective(θ_vec::AbstractVector{<:Real})
         return 1e14
     end
 
-    # Extract K=3 mixture parameters from positions 1-26
+    # Extract K=3 mixture parameters 
     common    = θ_vec[1:13]      # α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E
     type_1    = θ_vec[14:16]     # ξ_C_1, ξ_E_1, ξ_CE_1
     type_2    = θ_vec[17:19]     # ξ_C_2, ξ_E_2, ξ_CE_2
@@ -2999,11 +3062,11 @@ function objective(θ_vec::AbstractVector{<:Real})
     π_0_3     = θ_vec[25]        # type 3 baseline logit intercept
     π_TYA_3   = θ_vec[26]        # type 3 TYA share shifter
 
-    # Extract price coefficients (common params 12-13) for the P_obs correction in the likelihood
+    # Extract price coefficients for the P_obs correction in the likelihood
     ω_C = Float64(common[12])
     ω_E = Float64(common[13])
 
-    # When estimating ψ_3, extract it from position 27 and recompute flavored habit objects
+    # When estimating ψ_3, extract it recompute flavored habit objects
     if ESTIMATE_PSI_3
         ψ_3_val = θ_vec[27]
 
@@ -3019,12 +3082,12 @@ function objective(θ_vec::AbstractVector{<:Real})
         aflav_continuous_eval = aflav_continuous_current
     end
 
-    # Construct per-type structural parameter vectors (16 elements each, matching get_flow_utility format)
+    # Construct per-type structural parameter vectors 
     θ_struct_1 = vcat(common, type_1)
     θ_struct_2 = vcat(common, type_2)
     θ_struct_3 = vcat(common, type_3)
 
-    # Compute flow utility for each type (each receives a 16-element θ_struct_k)
+    # Compute flow utility for each type 
     U_1 = get_flow_utility(
         θ_struct_1, N_J, N_A_f, N_A_s, N_A_flav, N_Pcomb, A_f, A_s, A_flav,
         q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, is_nonflavored_ecig, is_outside, cat_idx, Pcomb, has_cig, has_ecig
@@ -3038,7 +3101,7 @@ function objective(θ_vec::AbstractVector{<:Real})
         q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, is_nonflavored_ecig, is_outside, cat_idx, Pcomb, has_cig, has_ecig
     )
 
-    # Warm-start: reuse the previous V as initial guess within a NM run (K=3 warm-start).
+    # Warm-start: reuse the previous V as initial guess within a NM run.
     # Reset all V_warm arrays when the optimizer phase changes (new outer try, inner run, or long run).
     if WARM_START
 
@@ -3075,7 +3138,7 @@ function objective(θ_vec::AbstractVector{<:Real})
     # Solve VFI for all three types in parallel. The three VFI problems are independent
     # (same addiction/price transitions, different flow utilities U_1, U_2, U_3), so
     # Threads.@spawn launches them concurrently. Each VFI internally uses
-    # Threads.@threads over N_Pcomb×N_A_s×N_A_flav state triples; Julia's task scheduler distributes
+    # Threads.@threads over N_Pcomb×N_A_s×N_A_flav state triples; Julia distributes
     # all tasks across the available thread pool.
 
     # Launch VFI for type 1 (returns immediately, runs on available threads)
@@ -3140,7 +3203,7 @@ function objective(θ_vec::AbstractVector{<:Real})
     end
 
     # Store converged V for warm-starting the next evaluation (all three types).
-    # Only store when all VFIs converged; unconverged V (penalty case) is not stored.
+    # Only store when all VFIs converged; unconverged V is not stored.
     if WARM_START
         V_warm_est_1 = V_1
         V_warm_est_2 = V_2
@@ -3148,7 +3211,7 @@ function objective(θ_vec::AbstractVector{<:Real})
     end
 
     # Compute mixture log-likelihood via 5-linear interpolation at continuous states
-    # Mixing weights are household-specific K=3 softmax: logit_k_h = π_0_k + π_TYA_k · tya_share_h
+    # Mixing weights are household-specific K=3 multinomial logit: logit_k_h = π_0_k + π_TYA_k · tya_share_h
     LL = log_likelihood_mixture(
         [V_decision_1, V_decision_2, V_decision_3], π_0_2, π_TYA_2, π_0_3, π_TYA_3, tya_share_hh,
         N_J, N_P, A_f, A_s, A_flav, P,
@@ -3166,7 +3229,7 @@ function objective(θ_vec::AbstractVector{<:Real})
     if print_this
         log_msg("")
         θ_str = join([@sprintf("%.6f", x) for x in θ_vec], ", ")
-        # Compute average mixing weights across households for logging (K=3 softmax)
+        # Compute average mixing weights across households for logging 
         avg_π = [0.0, 0.0, 0.0]
         for s in tya_share_hh
             l2 = π_0_2 + π_TYA_2 * s
