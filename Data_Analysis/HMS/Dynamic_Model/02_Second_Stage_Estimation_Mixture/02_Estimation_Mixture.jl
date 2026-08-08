@@ -5,16 +5,14 @@
 # June 2026
 #
 # This script estimates the structural parameters of the dynamic model by
-# maximizing the sample log-likelihood via multi-start Nelder-Mead.
+# maximizing the sample log-likelihood via Nelder-Mead.
 #
 # The objective function for each candidate θ:
 #   1. Recomputes flow utility U given θ
 #   2. Solves the value function via VFI
 #   3. Computes the log-likelihood by interpolating V_decision
-#      at each observation's continuous  state
-#   4. Returns the negative log-likelihood (since we minimize)
-#
-# Progress is logged to a log file in the output directory (named by Slurm job ID on HPC, timestamp locally).
+#      at each observation's continuous state
+#   4. Returns the negative log-likelihood (since I minimize)
 ################################################################################
 
 
@@ -45,7 +43,7 @@ VFI_TOL = 1e-4
 # Load all functions and packages from the functions file
 include("./01_Functions_Mixture.jl")
 
-# Detect whether we are running on the HPC (any non-Windows system)
+# Detect whether I am running on the HPC (any non-Windows system)
 HPC = !Sys.iswindows()
 
 # Unique file suffix: date + Slurm job ID on HPC, date + HHMMSS locally
@@ -61,7 +59,7 @@ psi_3_tag = ESTIMATE_PSI_3 ? "Psi3_Est" : "Psi3_$(numeric_tag(PSI_3))"
 # File paths if on HPC or not
 if HPC
 
-    # Output path for results (resolve relative to script dir so it's unaffected by later cd)
+    # Output path for results
     output_dir = abspath(joinpath(@__DIR__, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results"))
     mkpath(output_dir)
 
@@ -78,7 +76,7 @@ else
 end
 
 # Create subdirectories for log, outer try, inner try, and estimates files.
-# Folder names match file naming convention (no replication number prefix since this is not a job array).
+# Folder names match file naming convention.
 log_dir          = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Log")
 outer_try_dir    = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Outer_Try_Params")
 inner_try_dir    = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Inner_Try_Params")
@@ -102,11 +100,10 @@ log_msg("")
 log_msg("Number of threads: $(Threads.nthreads())")
 log_msg("")
 
-# Get household identifiers (pre-loaded to avoid repeated CSV reads in objective)
+# Get household identifiers 
 hh_codes = get_hh_codes();
 
 # Pre-compute contiguous household index ranges for mixture log-likelihood
-# (called once; result is used by log_likelihood_mixture in every objective evaluation)
 hh_ranges = precompute_hh_ranges(hh_codes);
 
 
@@ -209,7 +206,7 @@ p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_t
 
 # Map observed household prices to continuous values for likelihood interpolation
 # p_continuous is N × 2 (cig price, ecig price): representative (median-across-bins) prices for VFI interpolation
-# P_obs_cig / P_obs_ecig are N × N_J matrices of actual bin-specific prices for the P_obs correction
+# P_obs_cig / P_obs_ecig are N × N_J matrices of actual bin-specific prices 
 _, p_continuous, P_obs_cig, P_obs_ecig = map_prices_to_grid(N_P, P, Pcomb, N_J);
 
 
@@ -218,26 +215,24 @@ _, p_continuous, P_obs_cig, P_obs_ecig = map_prices_to_grid(N_P, P, Pcomb, N_J);
 # Objects (Two Stocks)
 #############################
 
-# Fast stock (always pre-computed, ψ_2 is never estimated)
+# Fast stock 
 af_lower_current, af_upper_current, af_weight_current = precompute_addiction_transitions(N_J, N_A_f, ψ_2, A_f, n)
 af0_current, _ = get_initial_addiction_stock(ψ_2, A_f, n, y, hh_codes)
 af_continuous_current = simulate_addiction_trajectories(N_A_f, ψ_2, A_f, n, y, hh_codes, af0_current)
 
-# Slow stock (pre-computed at fixed ψ_1 = 0.10)
+# Slow stock
 as_lower_current, as_upper_current, as_weight_current = precompute_addiction_transitions(N_J, N_A_s, ψ_1, A_s, n)
 as0_current, _ = get_initial_addiction_stock(ψ_1, A_s, n, y, hh_codes)
 as_continuous_current = simulate_addiction_trajectories(N_A_s, ψ_1, A_s, n, y, hh_codes, as0_current)
 
 # Flavored habit stock
-# n_flav[j] = 1[flavored[j]] ∈ {0,1}: binary indicator; habit builds by one unit any time
-# a flavored alternative is chosen, regardless of quantity.
 n_flav     = Float64.(is_flavored)             # ∈ {0.0, 1.0}
 n_flav_max = 1.0                               # binary max; rescale γ_2, γ_3, γ_4 by × ψ_3
 N_A_flav, A_flav = get_addiction_space(PSI_3; N_A=10)
 
 # When ψ_3 is fixed, pre-compute transitions and trajectories once.
 # When ψ_3 is estimated, these are recomputed inside the objective function
-# at each candidate ψ_3 value, so we only set initial values here.
+# at each candidate ψ_3 value, so I only set initial values here.
 aflav_lower_current, aflav_upper_current, aflav_weight_current = precompute_addiction_transitions(N_J, N_A_flav, PSI_3, A_flav, n_flav)
 aflav0_current, _ = get_initial_addiction_stock(PSI_3, A_flav, n_flav, y, hh_codes)
 aflav_continuous_current = simulate_addiction_trajectories(N_A_flav, PSI_3, A_flav, n_flav, y, hh_codes, aflav0_current)
@@ -261,22 +256,21 @@ log_msg("  A_flav_max   = $(maximum(A_flav)) (flavored habit grid max, normalize
 log_msg("  PSI_3        = $PSI_3 (flavored habit decay rate, $(ESTIMATE_PSI_3 ? "ESTIMATED" : "fixed"))")
 log_msg("  ESTIMATE_PSI_3 = $ESTIMATE_PSI_3")
 
-# Standardized starting values for the K=3 mixture model
-# Common params include γ_2 (orig ecig/bundle lock-in), γ_3 (cig/orig bundle flavor lock-in), γ_4 (outside flavored withdrawal)
+# Standardized starting values
 # When ESTIMATE_PSI_3=true, ψ_3 is appended as the last parameter 
 if ESTIMATE_PSI_3
     starting_param = (
         α_C     =   1.7539962989,
         α_E     =   2.6528275992,
         α_CE    =  -0.5793447834,
-        λ_1     =   0.1458019323,  # flavor baseline (common)
-        λ_2     =   0.2106063714,  # flavor × TYA (common)
+        λ_1     =   0.1458019323,  
+        λ_2     =   0.2106063714,  
         λ_3     =  -0.0456078917,
         λ_4     =  -0.4563471644,
         γ_1     = -12.3435966720,
-        γ_2     = -11.9087621394,  # flavor lock-in penalty on orig ecig/bundle (cat 2, 5)
-        γ_3     =  -2.4146527666,  # flavor lock-in penalty on cig/orig bundle (cat 1, 5)
-        γ_4     =  -0.5518799376,  # flavored withdrawal cost on outside option
+        γ_2     = -11.9087621394, 
+        γ_3     =  -2.4146527666,  
+        γ_4     =  -0.5518799376,  
         ω_C     =  -0.30,
         ω_E     =  -1.10,
         ξ_C_1   =  -2.8416876225,
@@ -285,28 +279,28 @@ if ESTIMATE_PSI_3
         ξ_C_2   =  -4.8294614255,
         ξ_E_2   =  -3.8008342716,
         ξ_CE_2  =  -4.1974220102,
-        ξ_C_3   = -15.0000,        # type 3 starting values (non-purchasers: all low utility)
+        ξ_C_3   = -15.0000,        
         ξ_E_3   = -15.0000,
         ξ_CE_3  = -15.0000,
-        π_0_2   =  -0.69,           # type 2 baseline logit intercept (~5% ecig at tya=0)
-        π_TYA_2 =   0.50,          # type 2 TYA share shifter (TYA more likely ecig)
-        π_0_3   =   2.14,          # type 3 baseline logit intercept (~85% non-purchasers at tya=0)
-        π_TYA_3 =  -0.25,          # type 3 TYA share shifter (TYA slightly less likely non-purchaser)
-        ψ_3     =   0.75           # default starting value
+        π_0_2   =  -0.69,         
+        π_TYA_2 =   0.50,         
+        π_0_3   =   2.14,          
+        π_TYA_3 =  -0.25,          
+        ψ_3     =   0.75           
     )
 else
     starting_param = (
         α_C     =   1.7539962989,
         α_E     =   2.6528275992,
         α_CE    =  -0.5793447834,
-        λ_1     =   0.1458019323,  # flavor baseline (common)
-        λ_2     =   0.2106063714,  # flavor × TYA (common)
+        λ_1     =   0.1458019323, 
+        λ_2     =   0.2106063714,  
         λ_3     =  -0.0456078917,
         λ_4     =  -0.4563471644,
         γ_1     = -12.3435966720,
-        γ_2     = -11.9087621394,  # flavor lock-in penalty on orig ecig/bundle (cat 2, 5)
-        γ_3     =  -2.4146527666,  # flavor lock-in penalty on cig/orig bundle (cat 1, 5)
-        γ_4     =  -0.5518799376,  # flavored withdrawal cost on outside option
+        γ_2     = -11.9087621394,  
+        γ_3     =  -2.4146527666,  
+        γ_4     =  -0.5518799376, 
         ω_C     =  -0.30,
         ω_E     =  -1.10,
         ξ_C_1   =  -2.8416876225,
@@ -315,47 +309,47 @@ else
         ξ_C_2   =  -4.8294614255,
         ξ_E_2   =  -3.8008342716,
         ξ_CE_2  =  -4.1974220102,
-        ξ_C_3   = -15.0000,        # type 3 starting values (non-purchasers: all low utility)
+        ξ_C_3   = -15.0000,        
         ξ_E_3   = -15.0000,
         ξ_CE_3  = -15.0000,
-        π_0_2   =  -0.69,           # type 2 baseline logit intercept (~5% ecig at tya=0)
-        π_TYA_2 =   0.50,          # type 2 TYA share shifter (TYA more likely ecig)
-        π_0_3   =   2.14,          # type 3 baseline logit intercept (~85% non-purchasers at tya=0)
-        π_TYA_3 =  -0.25           # type 3 TYA share shifter (TYA slightly less likely non-purchaser)
+        π_0_2   =  -0.69,          
+        π_TYA_2 =   0.50,       
+        π_0_3   =   2.14,         
+        π_TYA_3 =  -0.25          
     )
 end
 
 # Initial simplex deviations for Nelder-Mead
 add = [
-    abs(starting_param.α_C)     * 0.50,   # α_C
-    abs(starting_param.α_E)     * 0.50,   # α_E
-    abs(starting_param.α_CE)    * 0.50,   # α_CE
-    abs(starting_param.λ_1)     * 0.50,   # λ_1: flavor baseline (common)
-    abs(starting_param.λ_2)     * 0.50,   # λ_2: flavor × TYA (common)
-    abs(starting_param.λ_3)     * 0.50,   # λ_3
-    abs(starting_param.λ_4)     * 0.50,   # λ_4
-    abs(starting_param.γ_1)     * 1.00,   # γ_1: larger for dynamic parameters
-    abs(starting_param.γ_2)     * 1.00,   # γ_2: larger for dynamic parameters
-    abs(starting_param.γ_3)     * 1.00,   # γ_3: larger for dynamic parameters
-    abs(starting_param.γ_4)     * 1.00,   # γ_4: larger for dynamic parameters
-    abs(starting_param.ω_C)     * 0.50,   # ω_C
-    abs(starting_param.ω_E)     * 0.50,   # ω_E
-    abs(starting_param.ξ_C_1)   * 0.50,   # ξ_C_1
-    abs(starting_param.ξ_E_1)   * 0.50,   # ξ_E_1
-    abs(starting_param.ξ_CE_1)  * 0.50,   # ξ_CE_1
-    abs(starting_param.ξ_C_2)   * 0.50,   # ξ_C_2
-    abs(starting_param.ξ_E_2)   * 0.50,   # ξ_E_2
-    abs(starting_param.ξ_CE_2)  * 0.50,   # ξ_CE_2
-    abs(starting_param.ξ_C_3)   * 0.50,   # ξ_C_3
-    abs(starting_param.ξ_E_3)   * 0.50,   # ξ_E_3
-    abs(starting_param.ξ_CE_3)  * 0.50,   # ξ_CE_3
-    abs(starting_param.π_0_2)   * 0.50,   # π_0_2
-    abs(starting_param.π_TYA_2) * 0.50,   # π_TYA_2
-    abs(starting_param.π_0_3)   * 0.50,   # π_0_3
-    abs(starting_param.π_TYA_3) * 0.50   # π_TYA_3
+    abs(starting_param.α_C)     * 0.50,  
+    abs(starting_param.α_E)     * 0.50,   
+    abs(starting_param.α_CE)    * 0.50,   
+    abs(starting_param.λ_1)     * 0.50,   
+    abs(starting_param.λ_2)     * 0.50,  
+    abs(starting_param.λ_3)     * 0.50,   
+    abs(starting_param.λ_4)     * 0.50,   
+    abs(starting_param.γ_1)     * 1.00,   
+    abs(starting_param.γ_2)     * 1.00,   
+    abs(starting_param.γ_3)     * 1.00,   
+    abs(starting_param.γ_4)     * 1.00,   
+    abs(starting_param.ω_C)     * 0.50,   
+    abs(starting_param.ω_E)     * 0.50,  
+    abs(starting_param.ξ_C_1)   * 0.50,   
+    abs(starting_param.ξ_E_1)   * 0.50,   
+    abs(starting_param.ξ_CE_1)  * 0.50,   
+    abs(starting_param.ξ_C_2)   * 0.50,   
+    abs(starting_param.ξ_E_2)   * 0.50,   
+    abs(starting_param.ξ_CE_2)  * 0.50,   
+    abs(starting_param.ξ_C_3)   * 0.50,   
+    abs(starting_param.ξ_E_3)   * 0.50,  
+    abs(starting_param.ξ_CE_3)  * 0.50,   
+    abs(starting_param.π_0_2)   * 0.50,   
+    abs(starting_param.π_TYA_2) * 0.50,   
+    abs(starting_param.π_0_3)   * 0.50,   
+    abs(starting_param.π_TYA_3) * 0.50   
 ]
 if ESTIMATE_PSI_3
-    push!(add, 0.20)                       # ψ_3: deviation of 0.20
+    push!(add, 0.20)                     
 end
 
 # Optimizer settings for random_amoeba multi-start Nelder-Mead
@@ -408,7 +402,7 @@ for (i, val) in enumerate(values(opt_param))
     log_msg(@sprintf("  %-8s  %12.6f", est_param_names[i], val))
 end
 
-# Save estimated parameters to _Estimates.csv (header row + estimate row; SE row added by 03_Standard_Errors_Mixture.jl)
+# Save estimated parameters to _Estimates.csv 
 estimates_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates.csv")
 open(estimates_path, "w") do io
     println(io, join(replace.(collect(String, string.(keys(opt_param))),
@@ -455,7 +449,7 @@ log_msg("===================================")
 # Convert opt_param NamedTuple to vector for extraction
 θ_hat_vec = collect(Float64, values(opt_param))
 
-# Extract K=3 mixture parameters from positions 1-26
+# Extract parameters
 common_post  = θ_hat_vec[1:13]
 type_1_post  = θ_hat_vec[14:16]
 type_2_post  = θ_hat_vec[17:19]
@@ -466,8 +460,7 @@ type_3_post  = θ_hat_vec[20:22]
 π_TYA_3_post = θ_hat_vec[26]
 
 # When ψ_3 was estimated, the pre-computed flavored addiction objects use ENV PSI_3, which
-# may differ from the estimated ψ_3 = θ_hat_vec[27]. Recompute at the estimated value so
-# the VFI re-solve and per-HH LL are consistent with what the objective maximized.
+# may differ from the estimated ψ_3 = θ_hat_vec[27]. Recompute at the estimated value.
 if ESTIMATE_PSI_3
     ψ_3_post = θ_hat_vec[27]
     N_A_flav, A_flav = get_addiction_space(ψ_3_post; N_A=10)
@@ -477,7 +470,7 @@ if ESTIMATE_PSI_3
     log_msg("Recomputed flavored addiction objects at estimated ψ_3 = $ψ_3_post for per-HH LL re-solve")
 end
 
-# Construct per-type structural parameter vectors (16 elements each)
+# Construct per-type structural parameter vectors 
 θ_struct_1_post = vcat(common_post, type_1_post)
 θ_struct_2_post = vcat(common_post, type_2_post)
 θ_struct_3_post = vcat(common_post, type_3_post)
@@ -545,7 +538,7 @@ hh_ll = Vector{Float64}(undef, N_hh)
 for h in 1:N_hh
     start_idx, stop_idx = hh_ranges[h]
 
-    # Household-specific log mixing weights (K=3 softmax, type 1 normalized)
+    # Household-specific log mixing weights 
     logit_2_h   = π_0_2_post + π_TYA_2_post * tya_share_hh[h]
     logit_3_h   = π_0_3_post + π_TYA_3_post * tya_share_hh[h]
     log_denom_h = logsumexp([0.0, logit_2_h, logit_3_h])
@@ -610,14 +603,14 @@ log_msg("Per-household LL saved to: $hh_ll_path")
 #-----------------------------------------------------------------------
 # Rescaling Estimates to Original Units
 #-----------------------------------------------------------------------
-# The estimated parameters (opt_param) are in STANDARDIZED units because
+# The estimated parameters are in STANDARDIZED units because
 # the data entering the utility function was standardized. To interpret
 # the estimates in original units (utils per pack, utils per dollar,
 # etc.), rescale as follows:
 #
 # Two-stock addiction: a = (ã_f + ã_s) / 2. At steady state, ã_f = ã_s = n_std
 # = n_raw/n_max regardless of ψ, so a = n_raw/n_max. Rescaling γ_1 by ÷ n_max
-# gives utils per mg of nicotine consumed per month (assumption-free at SS).
+# gives utils per mg of nicotine consumed per month.
 # Flavored habit: ã_flav = ψ_3 × a_flav_raw / n_flav_max, so rescaling γ_2, γ_3, γ_4
 # by × ψ_3 ÷ n_flav_max gives utils per mL of raw flavored ecig stock.
 #
@@ -630,7 +623,7 @@ log_msg("Per-household LL saved to: $hh_ll_path")
 #   ω_C_orig  = ω_C_std  / q_cig_max           → utils per ($ × pack)
 #   ω_E_orig  = ω_E_std  / q_ecig_max          → utils per ($ × mL)
 #
-#   γ_1_orig  = γ_1_std / n_max                 (utils per mg nicotine consumed at SS)
+#   γ_1_orig  = γ_1_std / n_max                 (utils per mg nicotine consumed)
 #   γ_2_orig  = γ_2_std × ψ_3 / n_flav_max  (utils per mL raw flavored ecig stock, ecig/bundle lock-in)
 #   γ_3_orig  = γ_3_std × ψ_3 / n_flav_max  (utils per mL raw flavored ecig stock, cig/orig bundle lock-in)
 #   γ_4_orig  = γ_4_std × ψ_3 / n_flav_max  (utils per mL raw flavored ecig stock, outside flavored withdrawal)

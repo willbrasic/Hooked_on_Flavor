@@ -7,8 +7,7 @@
 # This script computes standard errors for the dynamic model parameter
 # estimates via finite differences on the full objective function.
 #
-# The Hessian H of the negative log-likelihood is approximated numerically
-# using parameter-relative step sizes h_k = max(|θ_hat[k]| * 1e-3, 1e-4):
+# The Hessian H of the negative log-likelihood is approximated numerically:
 #   - Diagonal:     H[k,k] ≈ (f(θ+h_k·e_k) - 2·f(θ) + f(θ-h_k·e_k)) / h_k^2
 #   - Off-diagonal: H[k,l] ≈ (f(θ+h_k·e_k+h_l·e_l) - f(θ+h_k·e_k-h_l·e_l)
 #                            -  f(θ-h_k·e_k+h_l·e_l) + f(θ-h_k·e_k-h_l·e_l)) / (4·h_k·h_l)
@@ -24,7 +23,7 @@
 # Preliminaries
 #############################
 
-# β can vary across runs but is never estimated - read from ENV to match 02_Estimation_Mixture.jl
+# β can vary across runs but is never estimated
 BETA = parse(Float64, get(ENV, "BETA", "1.0"))
 
 # Fixed parameters (ψ_1, ψ_2 always fixed; β fixed per run but can vary across runs)
@@ -32,10 +31,10 @@ BETA = parse(Float64, get(ENV, "BETA", "1.0"))
 ψ_2 = 0.90
 β   = BETA
 
-# Fixed flavored habit decay rate ψ_3 (never estimated, read from ENV for grid search)
+# Fixed flavored habit decay rate ψ_3 
 PSI_3 = parse(Float64, get(ENV, "PSI_3", "0.75"))
 
-# Whether ψ_3 was estimated jointly (22nd parameter) - must match the estimation run
+# Whether ψ_3 was estimated jointly 
 ESTIMATE_PSI_3 = parse(Bool, get(ENV, "ESTIMATE_PSI_3", "false"))
 
 # Enable warm-start VFI: reuse the previous evaluation's converged V as the
@@ -50,7 +49,7 @@ VFI_TOL = 1e-6
 include("01_Functions_Mixture.jl")
 using LinearAlgebra
 
-# Detect whether we are running on the HPC (any non-Windows system)
+# Detect whether I am running on the HPC (any non-Windows system)
 HPC = !Sys.iswindows()
 
 # Initialize warm-start globals for SE computation
@@ -74,7 +73,7 @@ psi_3_tag = ESTIMATE_PSI_3 ? "Psi3_Est" : "Psi3_$(numeric_tag(PSI_3))"
 # File paths if on HPC or not
 if HPC
 
-    # Output path for results (use absolute path so it's unaffected by later cd)
+    # Output path for results 
     output_dir = abspath("./Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results")
     mkpath(output_dir)
 
@@ -82,7 +81,7 @@ if HPC
     cd("/home/u2/wbrasic/4th_Year_Paper/Data")
 else
 
-    # Output path for results (local Windows path, includes beta tag in directory name)
+    # Output path for results 
     output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results"
     mkpath(output_dir)
 
@@ -210,10 +209,10 @@ _, p_continuous, P_obs_cig, P_obs_ecig = map_prices_to_grid(N_P, P, Pcomb, N_J);
 #############################
 
 # Pre-compute addiction transition brackets for all (alternative, addiction state) pairs.
-# Fast stock (pre-computed at fixed ψ_2)
+# Fast stock 
 af_lower_current, af_upper_current, af_weight_current = precompute_addiction_transitions(N_J, N_A_f, ψ_2, A_f, n)
 
-# Slow stock (pre-computed at fixed ψ_1)
+# Slow stock 
 as_lower_current, as_upper_current, as_weight_current = precompute_addiction_transitions(N_J, N_A_s, ψ_1, A_s, n)
 
 # Pre-compute initial addiction stocks via fixed-point iteration and simulate
@@ -226,9 +225,9 @@ af_continuous_current = simulate_addiction_trajectories(N_A_f, ψ_2, A_f, n, y, 
 as0_current, _ = get_initial_addiction_stock(ψ_1, A_s, n, y, hh_codes)
 as_continuous_current = simulate_addiction_trajectories(N_A_s, ψ_1, A_s, n, y, hh_codes, as0_current)
 
-# Flavored habit stock (pre-computed at ENV PSI_3; objective recomputes at each candidate ψ_3 when ESTIMATE_PSI_3=true)
-n_flav     = Float64.(is_flavored)             # ∈ {0.0, 1.0}
-n_flav_max = 1.0                               # binary max; rescale γ_2, γ_3, γ_4 by × ψ_3
+# Flavored habit stock 
+n_flav     = Float64.(is_flavored)           
+n_flav_max = 1.0                            
 N_A_flav, A_flav = get_addiction_space(PSI_3; N_A=10)
 aflav_lower_current, aflav_upper_current, aflav_weight_current = precompute_addiction_transitions(N_J, N_A_flav, PSI_3, A_flav, n_flav)
 aflav0_current, _ = get_initial_addiction_stock(PSI_3, A_flav, n_flav, y, hh_codes)
@@ -249,7 +248,7 @@ estimates_subdir = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(b
 estimates_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates.csv")
 df_est = CSV.read(estimates_path, DataFrame)
 
-# Drop the NLL column if present (not a structural parameter)
+# Drop the NLL column if present 
 if "NLL" in names(df_est)
     select!(df_est, Not(:NLL))
 end
@@ -480,7 +479,7 @@ end
 # Print and log SE save location
 log_msg("\nSEs saved to: $se_path")
 
-# Save full variance-covariance matrix (needed for delta method SEs)
+# Save full variance-covariance matrix (needed for delta method SEs for certain parameters)
 vcov_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_VCov.csv")
 vcov_df = DataFrame(V, param_names)
 CSV.write(vcov_path, vcov_df)
@@ -502,8 +501,8 @@ log_msg("Variance-covariance matrix saved to: $vcov_path")
 # where s = household TYA share (fraction of months with TYA present).
 #
 # These probabilities are NONLINEAR functions of the estimated parameters
-# (they involve exp() and a denominator), so we cannot simply scale a standard
-# error. Instead, we apply the delta method: approximate the variance of a
+# (they involve exp() and a denominator), so I cannot simply scale a standard
+# error. Instead, I apply the delta method: approximate the variance of a
 # nonlinear function g(θ) around the MLE θ_hat using a first-order Taylor
 # expansion,
 #
@@ -516,24 +515,21 @@ log_msg("Variance-covariance matrix saved to: $vcov_path")
 # --- Model for mixing weights ---
 #
 # Each household h with TYA share s_h belongs to one of K=3 latent types.
-# The mixing probabilities are a K=3 softmax over two logit indices:
+# The mixing probabilities are a K=3 softmax:
 #
-#   l2(s) = π_0_2 + π_TYA_2 · s      (log-odds of Type 2 vs. Type 1)
-#   l3(s) = π_0_3 + π_TYA_3 · s      (log-odds of Type 3 vs. Type 1)
+#   l2(s) = π_0_2 + π_TYA_2 · s      
+#   l3(s) = π_0_3 + π_TYA_3 · s     
 #
 #   P(Type 1 | s) = 1 / (1 + exp(l2) + exp(l3))
 #   P(Type 2 | s) = exp(l2) / (1 + exp(l2) + exp(l3))
 #   P(Type 3 | s) = exp(l3) / (1 + exp(l2) + exp(l3))
 #
-# We report mixing probabilities at two representative TYA-share values:
-#   s = 0: household with TYA never present  → logits = (π_0_2, π_0_3)
-#   s = 1: household with TYA always present → logits = (π_0_2+π_TYA_2, π_0_3+π_TYA_3)
 
 # Locate the four mixing parameters in the θ vector.
 # Their positions depend on whether ψ_3 was estimated as a 27th parameter:
 #   ESTIMATE_PSI_3=true  (27 params): [..., π_0_2(23), π_TYA_2(24), π_0_3(25), π_TYA_3(26), ψ_3(27)]
 #   ESTIMATE_PSI_3=false (26 params): [..., π_0_2(23), π_TYA_2(24), π_0_3(25), π_TYA_3(26)]
-# In both cases the mixing params are the last 4 non-ψ_3 entries, so we index
+# In both cases the mixing params are the last 4 non-ψ_3 entries, so I index
 # from the end of the parameter vector, shifting by 1 when ψ_3 occupies slot N_params.
 idx_pi_0_2   = ESTIMATE_PSI_3 ? N_params - 4 : N_params - 3
 idx_pi_TYA_2 = ESTIMATE_PSI_3 ? N_params - 3 : N_params - 2
@@ -566,49 +562,51 @@ function softmax3_se(l2, l3, idx2, idx3, x2, x3, V)
     # D = total number of parameters (length of θ, = size of the VCov matrix)
     D = size(V, 1)
 
+    # ALL BELOW GRADIENTS ARE DERIVED IN PAPER APPENDIX
+
     # --- Gradient for Type 1: ∇p_1 ---
     # Type 1 is the base category with no logit of its own. Its probability falls
     # whenever l2 or l3 rises, so all four partial derivatives are negative.
-    # ∂p_1/∂π_0_2   = -p_1·p_2        (Type 1 is not Type 2, so no own-logit term)
-    # ∂p_1/∂π_TYA_2 = -p_1·p_2·s      (same, scaled by TYA share s)
-    # ∂p_1/∂π_0_3   = -p_1·p_3        (Type 1 is not Type 3)
+    # ∂p_1/∂π_0_2   = -p_1·p_2        
+    # ∂p_1/∂π_TYA_2 = -p_1·p_2·s      
+    # ∂p_1/∂π_0_3   = -p_1·p_3        
     # ∂p_1/∂π_TYA_3 = -p_1·p_3·s
     # All other entries are 0.
     g1 = zeros(D)
-    for (d, coeff) in zip(idx2, x2 .* (p1 * (0.0 - p2)))    # contributions from π_0_2, π_TYA_2
+    for (d, coeff) in zip(idx2, x2 .* (p1 * (0.0 - p2)))   
         g1[d] += coeff
     end
-    for (d, coeff) in zip(idx3, x3 .* (p1 * (0.0 - p3)))    # contributions from π_0_3, π_TYA_3
+    for (d, coeff) in zip(idx3, x3 .* (p1 * (0.0 - p3)))   
         g1[d] += coeff
     end
 
     # --- Gradient for Type 2: ∇p_2 ---
     # Type 2 has its own logit l2, so its own-logit derivative has a +1 term.
-    # ∂p_2/∂π_0_2   = p_2·(1 - p_2)   (own logit: positive, like a logit slope)
-    # ∂p_2/∂π_TYA_2 = p_2·(1 - p_2)·s (same, scaled by TYA share s)
-    # ∂p_2/∂π_0_3   = -p_2·p_3        (cross logit: Type 2 loses share when l3 rises)
+    # ∂p_2/∂π_0_2   = p_2·(1 - p_2)   
+    # ∂p_2/∂π_TYA_2 = p_2·(1 - p_2)·s 
+    # ∂p_2/∂π_0_3   = -p_2·p_3        
     # ∂p_2/∂π_TYA_3 = -p_2·p_3·s
     # All other entries are 0.
     g2 = zeros(D)
-    for (d, coeff) in zip(idx2, x2 .* (p2 * (1.0 - p2)))    # contributions from π_0_2, π_TYA_2
+    for (d, coeff) in zip(idx2, x2 .* (p2 * (1.0 - p2)))    
         g2[d] += coeff
     end
-    for (d, coeff) in zip(idx3, x3 .* (p2 * (0.0 - p3)))    # contributions from π_0_3, π_TYA_3
+    for (d, coeff) in zip(idx3, x3 .* (p2 * (0.0 - p3)))  
         g2[d] += coeff
     end
 
     # --- Gradient for Type 3: ∇p_3 ---
     # Type 3 has its own logit l3, so its own-logit derivative has a +1 term.
-    # ∂p_3/∂π_0_2   = -p_3·p_2        (cross logit: Type 3 loses share when l2 rises)
+    # ∂p_3/∂π_0_2   = -p_3·p_2        
     # ∂p_3/∂π_TYA_2 = -p_3·p_2·s
-    # ∂p_3/∂π_0_3   = p_3·(1 - p_3)   (own logit: positive)
-    # ∂p_3/∂π_TYA_3 = p_3·(1 - p_3)·s (same, scaled by TYA share s)
+    # ∂p_3/∂π_0_3   = p_3·(1 - p_3)  
+    # ∂p_3/∂π_TYA_3 = p_3·(1 - p_3)·s 
     # All other entries are 0.
     g3 = zeros(D)
-    for (d, coeff) in zip(idx2, x2 .* (p3 * (0.0 - p2)))    # contributions from π_0_2, π_TYA_2
+    for (d, coeff) in zip(idx2, x2 .* (p3 * (0.0 - p2)))    
         g3[d] += coeff
     end
-    for (d, coeff) in zip(idx3, x3 .* (p3 * (1.0 - p3)))    # contributions from π_0_3, π_TYA_3
+    for (d, coeff) in zip(idx3, x3 .* (p3 * (1.0 - p3)))    
         g3[d] += coeff
     end
 
@@ -669,7 +667,7 @@ log_msg(@sprintf("  P(Type 3 | TYA Always Present) = %.4f  (SE = %.4f)", p3_tya,
 
 # All structural parameters were estimated in STANDARDIZED units because
 # quantities and nicotine were divided by their sample maxima before entering
-# the objective. To report interpretable estimates and SEs, we rescale back to
+# the objective. To report interpretable estimates and SEs, I rescale back to
 # original units using the same transformations applied during estimation.
 #
 # There are three groups, depending on what type of rescaling is required:
@@ -700,19 +698,12 @@ log_msg(@sprintf("  P(Type 3 | TYA Always Present) = %.4f  (SE = %.4f)", p3_tya,
 # GROUP 2 - Multiply by estimated ψ_3 (requires the delta method)
 # -----------------------------------------------------------------------
 #
-#   The flavored habit stock entering utility is the NORMALIZED stock:
-#       ã_flav = ψ_3 · a_raw
-#   where a_raw is the raw (unnormalized) habit stock and ψ_3 is the decay
-#   rate. The utility contribution of γ_k in standardized units is:
-#       γ_k_std · ã_flav = γ_k_std · ψ_3 · a_raw
-#   So the coefficient on a_raw (original units) is:
-#       γ_k_orig = γ_k_std · ψ_3 / n_flav_max
-#   where n_flav_max = 1.0 (the binary indicator input is already in [0,1]).
+#   THIS IS FULLY EXPLAINED IN PAPER APPENDIX
 #
 #   WHY THE DELTA METHOD IS NEEDED:
 #   When ψ_3 is estimated jointly (ESTIMATE_PSI_3=true), γ_k_orig is a
 #   PRODUCT of two estimated quantities. The SE of a product is not simply
-#   the product of the individual SEs as we must account for (a) the variance
+#   the product of the individual SEs as I must account for (a) the variance
 #   in γ_k, (b) the variance in ψ_3, and (c) the covariance between them.
 #
 #   DERIVATION:
@@ -769,7 +760,7 @@ log_msg("Group 2 - multiply by ψ_3 (delta method SEs when ψ_3 estimated, simpl
 if ESTIMATE_PSI_3
 
     # ψ_3 occupies the last position in θ when estimated
-    idx_psi_3 = N_params          # position 27 in the 27-parameter model
+    idx_psi_3 = N_params         # ψ_3 is the last parameter in θ     
     ψ_3_hat   = θ_hat[idx_psi_3] # point estimate of ψ_3
 
     # Loop over γ_2 (pos 9), γ_3 (pos 10), γ_4 (pos 11)
@@ -807,7 +798,7 @@ end
 
 # --- Group 3: no rescaling ---
 log_msg("")
-log_msg("Group 3 - no rescaling needed (parameters already in interpretable units):")
+log_msg("Group 3 - no rescaling needed:")
 log_msg("  λ_1 through λ_4, ξ's (k=1,2,3), π_0_2, π_TYA_2, π_0_3, π_TYA_3, ψ_3")
 
 # Print and log SE computation finished message
