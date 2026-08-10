@@ -4,7 +4,6 @@
 # wbrasic97@gmail.com
 # June 2026
 #
-# Simulation-based model validation functions for the model
 # Instead of using predicted choice probabilities directly, this approach
 # simulates forward choice sequences from the model: at each month, draw a
 # choice from the logit probabilities, then evolve the addiction stock based
@@ -39,12 +38,10 @@ period indices (1, 2, 3, ...) for time-series aggregation.
 
 Integer indices are required because the streak persistence and post-purchase
 path functions detect consecutive months via period_idx[i+1] == period_idx[i] + 1.
-The (household, period) lookup table in compute_post_purchase_paths also keys on these integers to
-enable fast forward-horizon lookups.
 
 Returns:
-- period_idx:    Vector{Int} of period indices for each observation
-- period_labels: Vector{String} of calendar month labels (e.g., "2021-01")
+- period_idx:    Vector of period indices for each observation
+- period_labels: Vector of calendar month labels (e.g., "2021-01")
 - N_periods:     Number of unique periods
 """
 function get_period_indices(;
@@ -56,7 +53,7 @@ function get_period_indices(;
     # Extract purchase month strings
     months_raw = string.(df.purchase_month)
 
-    # Get unique months in sorted order (YYYY-MM-DD format sorts correctly)
+    # Get unique months in sorted order 
     unique_months = sort(unique(months_raw))
     N_periods = length(unique_months)
 
@@ -69,7 +66,7 @@ function get_period_indices(;
     # Map each observation to its period index
     period_idx = [month_to_idx[m] for m in months_raw]
 
-    # Clean labels (YYYY-MM format)
+    # Clean labels 
     period_labels = [m[1:7] for m in unique_months]
 
     return period_idx, period_labels, N_periods
@@ -85,17 +82,16 @@ end
 Compute predicted choice probabilities at all observed states under a given
 V_choice solution.
 
-This function is used in two distinct contexts where probabilities must be
+This function is used in two distinct places where probabilities must be
 evaluated at OBSERVED (not simulated) addiction states. First, the posterior
 type weight computation requires evaluating each type's likelihood at the
 observed states to apply Bayes' rule. Second, the price elasticity exercise
 needs aggregate choice probabilities at observed states under both the baseline
 and price-shocked V_choice solutions so that baseline and shocked shares are
-comparable at the same observed states. The forward simulation
-(simulate_household_sequences_mixture) does NOT use this function; it calls
-interpolate_v_choice directly at the evolving simulated addiction state.
+comparable at the same observed states. The forward simulation does NOT use this function; it calls
+interpolate_v_choice directly at the evolving SIMULATED (not observed) addiction state.
 
-For each observation i with state (tya_i, af_i, as_i, aflav_i, p_cig_i, p_ecig_i):
+For each observation i at their current state:
   1. Interpolate V_choice at the continuous state for all N_J alternatives
   2. Compute softmax choice probabilities
 
@@ -138,10 +134,10 @@ function compute_predicted_probs(
         replace!(v_interp, NaN => -Inf)
 
         # Softmax choice probabilities.
-        # We shift by v_max before exponentiating to prevent numerical overflow.
+        # I shift by v_max before exponentiating to prevent numerical overflow.
         # The ratio exp(v_j - v_max) / sum(exp(v_k - v_max)) is mathematically
         # identical to exp(v_j) / sum(exp(v_k)), but when v_j is very large (e.g.,
-        # 700+), exp(v_j) = Inf in Float64. Subtracting v_max ensures all arguments
+        # 700+), exp(v_j) = Inf. Subtracting v_max ensures all arguments
         # are <= 0, so exp() stays finite.
         v_max = maximum(v_interp)
         v_shifted = v_interp .- v_max
@@ -161,17 +157,14 @@ end
 #############################
 
 """
-Simulate choice sequences for all households under the K=3 mixture model.
+Simulate choice sequences for all households.
 
-This is the core engine that both validation exercises call in every draw.
-Its key distinction from `compute_predicted_probs` is that it evaluates
+The key distinction from `compute_predicted_probs` is that it evaluates
 V_choice at the evolving SIMULATED addiction states rather than the observed
 state: the type draw is stochastic, prices and TYA are held at observed values,
 but addiction stocks grow endogenously from the sequence of simulated choices.
 Validating against the observed-state probabilities from `compute_predicted_probs`
-would only confirm in-sample fit at observed states: because the model was
-estimated by maximizing the likelihood at those exact states, matching
-probabilities there is a necessary but weak criterion. The stricter test is
+would only confirm in-sample fit at observed states. The stricter test is
 whether the model's own dynamics are internally consistent. In the forward
 simulation, the addiction stock at month t is determined by what the model
 itself chose in months 1 through t-1, not by what the household actually chose.
@@ -245,7 +238,7 @@ function simulate_household_sequences_mixture(
         # type-k likelihood evaluated at the observed choice sequence y_h.
         # Each row sums to 1 across K=3 columns.
         #
-        # We assign a type for this draw by sampling from the posterior rather
+        # I assign a type for this draw by sampling from the posterior rather
         # than taking the argmax (most likely type). The difference matters for
         # households whose posteriors are not concentrated: a household with
         # posterior (0.45, 0.35, 0.20) would always be assigned to type 1 under
@@ -253,13 +246,9 @@ function simulate_household_sequences_mixture(
         # Stochastic assignment instead draws type 1 with probability 0.45,
         # type 2 with 0.35, and type 3 with 0.20. So, across S draws the
         # household's simulated sequences average over its type uncertainty.
-        # This keeps the aggregate simulation statistics (streak rates,
-        # post-purchase paths) free of the bias that argmax assignment would
-        # introduce by over-representing the single most likely type.
         #
         # Implementation: draw u ~ U[0,1], then select the type whose
-        # cumulative posterior interval contains u. For K=3 this reduces to
-        # two comparisons rather than a loop.
+        # cumulative posterior interval contains u. 
         u = rand(rng)
         p1 = hh_posterior[h, 1]
         p2 = hh_posterior[h, 2]
@@ -281,7 +270,7 @@ function simulate_household_sequences_mixture(
 
             # Interpolate V_choice at the SIMULATED addiction state (not observed).
             # The addiction stock evolves from simulated choices, so V_choice is evaluated
-            # at the state the household would actually reach under the model.
+            # at the state the household would reach under the model.
             v_interp .= interpolate_v_choice(
                 V_choice, tya_state[i], a_f_h, a_s_h, a_flav_h,
                 p_continuous[i, 1], p_continuous[i, 2],
@@ -291,21 +280,18 @@ function simulate_household_sequences_mixture(
             # Fix NaN from 0.0 * (-Inf) 
             replace!(v_interp, NaN => -Inf)
 
-            # Softmax choice probabilities (shift by v_max to prevent overflow;
-            # the ratio is invariant to this constant shift).
+            # Softmax choice probabilities (shift by v_max to prevent overflow).
             v_max = maximum(v_interp)
             exp_v = exp.(v_interp .- v_max)
             sum_exp_v = sum(exp_v)
-            exp_v ./= sum_exp_v  # normalize in-place to get choice probabilities
+            exp_v ./= sum_exp_v  
 
-            # Draw a choice via the inverse CDF method (categorical sampling).
-            # u_draw is uniform on [0,1]; we walk through cumulative probabilities
-            # until we exceed u_draw. j_sim = N_J is a fallback: due to floating-point
-            # rounding, the cumulative sum may never strictly exceed u_draw for the last
-            # alternative, so the default ensures j_sim is always a valid index.
+            # Draw a choice via the inverse CDF method.
+            # u_draw is uniform on [0,1]; I walk through cumulative probabilities
+            # until I exceed u_draw.
             u_draw = rand(rng)
             cumulative = 0.0
-            j_sim = N_J  # fallback if floating-point rounding prevents the last alternative from triggering
+            j_sim = N_J  # fallback if rounding prevents the last alternative from triggering
             for j in 1:N_J
                 cumulative += exp_v[j]
                 if u_draw <= cumulative
@@ -344,31 +330,16 @@ end
 Compute streak-length continuation rates from simulated choice sequences,
 for cigarettes and e-cigarettes only.
 
-WHAT IS A STREAK?
 A streak is consecutive months of buying the same product. If a household
 buys cigarettes in January, February, and March, their streak length in
 March is 3.
 
-WHAT IS A CONTINUATION RATE AT STREAK LENGTH k?
-It answers one question: of all the times any household had been buying
+A continuation rate is defined as of all the times any household had been buying
 for exactly k months in a row, what fraction of them bought again the next
 month? Example: if there are 100 observations where streak = 3 and 80 of
 them bought again the next month, the continuation rate at streak-3 = 0.80.
 This produces a single number between 0 and 1 for each streak length 1–12.
 
-WHAT DOES obs_mask DO?
-The optional `obs_mask` is a Bool vector of length N_obs (one entry per
-observation) used to compute subgroup-specific continuation rates, e.g.,
-TYA-only or non-TYA-only. When supplied, only observations where
-obs_mask[i] == true contribute to the continuation counts.
-
-Streak lengths are always computed on the FULL sequence first, before
-obs_mask is applied. This is necessary because streak length reflects the
-household's complete purchase history, which spans both TYA and non-TYA
-months. The goal is to compare whether TYA and non-TYA observations have
-different continuation rates at the SAME addiction level (proxied by streak
-length). Resetting streaks at TYA status changes would confound TYA
-exposure with addiction level, making the two groups incomparable.
 
 Example: household buys cigarettes in months 1–5; months 1–3 non-TYA,
 months 4–5 TYA.
@@ -386,8 +357,8 @@ streak-4 continued. If instead streaks were reset at TYA status changes,
 the TYA sequence would only contain months 4 and 5 with streak lengths 1
 and 2, so month 4 would incorrectly enter the streak-1 bucket.
 
-Returns Dict{String, Matrix{Float64}} with keys "cig", "ecig", "flav_ecig", "orig_ecig".
-Each matrix has max_streak rows x 3 columns: [streak_length, continuation_rate, N].
+Returns Dictionary with keys "cig", "ecig", "flav_ecig", "orig_ecig" corresponding
+to streak lengths for each of these categories.
 """
 function compute_sim_streak_continuation(
     sim_y::AbstractVector{<:Integer},
@@ -417,12 +388,7 @@ function compute_sim_streak_continuation(
 
     for (label, is_purchase) in [("cig", is_cig), ("ecig", is_ecig), ("flav_ecig", is_flav_ecig), ("orig_ecig", is_orig_ecig)]
 
-        # Compute streak lengths on the FULL data, without applying the TYA mask yet.
-        # Why compute on the full data before masking? Because streak length is a function
-        # of the household's complete purchase history. If we masked first (e.g., dropping
-        # non-TYA observations), a household with 5 consecutive cigarette purchases would
-        # appear to have streak = 1 when viewed through the mask, because the prior context
-        # was removed. The mask is only applied in the accumulation step below.
+        # Compute streak lengths on the FULL data
         #
         # Streak logic per observation i:
         #   - Not a purchase month: streak resets to 0
@@ -442,9 +408,6 @@ function compute_sim_streak_continuation(
         end
 
         # Accumulate continuation counts by streak length.
-        # The TYA mask is applied here: only count streak-end events at observations
-        # that pass the mask. This lets us compute TYA-specific continuation rates
-        # without corrupting the streak length values computed above.
         counts     = zeros(Float64, max_streak)
         continues  = zeros(Float64, max_streak)
 
@@ -456,13 +419,13 @@ function compute_sim_streak_continuation(
             end
 
             # Only count if the next period is the same household and a consecutive month.
-            # If the household drops out or there is a gap, we cannot observe whether
-            # the streak continued, so we skip this event.
+            # If the household drops out or there is a gap, I cannot observe whether
+            # the streak continued, so I skip this event.
             if hh_codes[i] != hh_codes[i+1] || period_idx[i+1] != period_idx[i] + 1
                 continue
             end
 
-            # Apply observation mask: only count events at observations that pass the filter
+            # Apply observation mask: only count events at observations that pass the filter (E.g., TYA-present HHs)
             if obs_mask !== nothing && !obs_mask[i]
                 continue
             end
@@ -474,7 +437,7 @@ function compute_sim_streak_continuation(
             continues[k_bin] += is_purchase[i+1] ? 1.0 : 0.0
         end
 
-        # Build results matrix: [streak_length, continuation_rate, N]
+        # Build results matrix
         res = Matrix{Float64}(undef, max_streak, 3)
         for k in 1:max_streak
             res[k, 1] = Float64(k)
@@ -496,14 +459,13 @@ end
 
 """
 Run S simulation draws and accumulate streak persistence statistics,
-separately for TYA and non-TYA households. The reported continuation rate
-at each streak length is (total continuations across all S draws) /
+separately for all households and TYA households. The reported continuation
+rate at each streak length is (total continuations across all S draws) /
 (total qualifying events across all S draws). For example, if across 100
 draws there were 3,000 total streak-5 events and 1,800 of them continued,
 the rate is 1,800/3,000 = 0.60. The confidence band captures simulation
 uncertainty: each of the S draws produces its own continuation rate at each
-streak length (since each draw uses a different RNG seed and therefore
-different type assignments and choice draws). The 2.5th and 97.5th percentiles
+streak length. The 2.5th and 97.5th percentiles
 of those S rates form the lower and upper bounds of the band, giving a 95%
 confidence band.
 
@@ -511,11 +473,9 @@ Returns a NamedTuple with:
 - streak_all:       Dict of matrices (cig, ecig, flav_ecig) for all households
                     Each matrix: max_streak × 3 [streak_length, mean_rate, avg_N]
 - streak_tya:       Dict of matrices (cig, ecig, flav_ecig) for TYA households
-- streak_no_tya:    Dict of matrices (cig, ecig, flav_ecig) for non-TYA households
 - streak_all_ci:    Dict of matrices (cig, ecig, flav_ecig) for all households
                     Each matrix: max_streak × 2 [p05, p95]
 - streak_tya_ci:    Dict of matrices (cig, ecig, flav_ecig) for TYA households
-- streak_no_tya_ci: Dict of matrices (cig, ecig, flav_ecig) for non-TYA households
 """
 function run_simulation_validation(
     V_choice_1::Array{Float64, 6},
@@ -547,9 +507,8 @@ function run_simulation_validation(
     max_streak::Integer = 12
 )
 
-    # Pre-compute TYA observation masks (binary: 1 = no TYA, 2 = TYA present)
-    mask_tya    = [tya_state[i] == 2 for i in eachindex(tya_state)]
-    mask_no_tya = [tya_state[i] == 1 for i in eachindex(tya_state)]
+    # Pre-compute TYA observation mask (binary: 1 = no TYA, 2 = TYA present)
+    mask_tya = [tya_state[i] == 2 for i in eachindex(tya_state)]
 
     # Streak labels
     streak_labels = ["cig", "ecig", "flav_ecig", "orig_ecig"]
@@ -559,13 +518,10 @@ function run_simulation_validation(
     acc_continues_all    = Dict(l => zeros(Float64, max_streak) for l in streak_labels)
     acc_counts_tya       = Dict(l => zeros(Float64, max_streak) for l in streak_labels)
     acc_continues_tya    = Dict(l => zeros(Float64, max_streak) for l in streak_labels)
-    acc_counts_no_tya    = Dict(l => zeros(Float64, max_streak) for l in streak_labels)
-    acc_continues_no_tya = Dict(l => zeros(Float64, max_streak) for l in streak_labels)
 
     # Per-draw continuation rates for confidence bands (max_streak × S)
     draw_rates_all    = Dict(l => fill(NaN, max_streak, S) for l in streak_labels)
     draw_rates_tya    = Dict(l => fill(NaN, max_streak, S) for l in streak_labels)
-    draw_rates_no_tya = Dict(l => fill(NaN, max_streak, S) for l in streak_labels)
 
     for s in 1:S
 
@@ -586,14 +542,11 @@ function run_simulation_validation(
         # Compute streak continuation rates for all households (no subgroup filter).
         # compute_sim_streak_continuation returns, for each streak length k:
         #   col 1 = k, col 2 = continuation rate in this draw, col 3 = number of events
-        # We do NOT average the per-draw rates directly. Instead we accumulate the raw
+        # I do NOT average the per-draw rates directly. Instead I accumulate the raw
         # event counts (n_k) and raw continuation counts (rate * n_k) across all S draws,
         # then divide once at the end. This gives: final rate = total_continuations /
         # total_events across all S draws. Draws with more qualifying events at streak k
         # therefore contribute more to the final estimate than low-count draws.
-        # draw_rates_all stores each draw's rate separately for the confidence band.
-        # When a draw has no events at streak k (rate = NaN), we add 0 to both
-        # numerator and denominator, so that draw is excluded from the point estimate.
         streak_all = compute_sim_streak_continuation(
             sim_y, cat_idx, hh_codes, period_idx;
             max_streak=max_streak
@@ -624,26 +577,10 @@ function run_simulation_validation(
                 draw_rates_tya[l][k, s]  = res[k, 2]
             end
         end
-
-        # Same accumulation for non-TYA-only months (obs_mask filters to tya_state == 1).
-        streak_no_tya = compute_sim_streak_continuation(
-            sim_y, cat_idx, hh_codes, period_idx;
-            obs_mask=mask_no_tya, max_streak=max_streak
-        )
-        for l in streak_labels
-            res = streak_no_tya[l]
-            for k in 1:max_streak
-                n_k = res[k, 3]
-                acc_counts_no_tya[l][k]    += n_k
-                acc_continues_no_tya[l][k] += isnan(res[k, 2]) ? 0.0 : res[k, 2] * n_k
-                draw_rates_no_tya[l][k, s]  = res[k, 2]
-            end
-        end
     end
 
     # Compute the final point estimate: total continuations / total events across
-    # all S draws. If no events were ever observed at a streak length across all
-    # draws (total count = 0), the rate is undefined and returned as NaN.
+    # all S draws.
     # Column 3 of the output matrix reports the average number of events per draw
     # (total count / S), which indicates how many observations supported each estimate.
     function compute_avg(acc_counts, acc_continues)
@@ -662,19 +599,9 @@ function run_simulation_validation(
 
     avg_streak_all    = compute_avg(acc_counts_all,    acc_continues_all)
     avg_streak_tya    = compute_avg(acc_counts_tya,    acc_continues_tya)
-    avg_streak_no_tya = compute_avg(acc_counts_no_tya, acc_continues_no_tya)
 
     # Compute confidence bands from the S per-draw continuation rates stored in
-    # draw_rates_*. Each draw produced its own rate at each streak length (because
-    # each draw used a different RNG seed, giving different type assignments and
-    # choice draws). The confidence band is the 2.5th–97.5th percentile of those
-    # S rates, computed empirically by sorting and indexing.
-    #
-    # Draws where no events occurred at a streak length produce NaN and are dropped
-    # before computing percentiles. If fewer than 2 valid draws remain, the CI is
-    # undefined and returned as NaN. ceil() is used so we always pick an observed
-    # rate rather than interpolating between two. max(1,...) prevents the lower
-    # index from falling below 1 for very small samples.
+    # draw_rates_*.
     function compute_ci(draw_rates::Dict{String, Matrix{Float64}})
         ci = Dict{String, Matrix{Float64}}()
         for l in streak_labels
@@ -700,15 +627,12 @@ function run_simulation_validation(
 
     ci_all    = compute_ci(draw_rates_all)
     ci_tya    = compute_ci(draw_rates_tya)
-    ci_no_tya = compute_ci(draw_rates_no_tya)
 
     return (
         streak_all       = avg_streak_all,
         streak_tya       = avg_streak_tya,
-        streak_no_tya    = avg_streak_no_tya,
         streak_all_ci    = ci_all,
-        streak_tya_ci    = ci_tya,
-        streak_no_tya_ci = ci_no_tya
+        streak_tya_ci    = ci_tya
     )
 end
 
@@ -727,7 +651,7 @@ of 5 destination groups the household chose at each future horizon. Only
 events with ALL max_horizon consecutive future months observed are included
 (complete paths only).
 
-The 5 destination groups collapse the 8-category scheme:
+The 5 destination groups:
   col 1 - "Flavored E-Cig"  (cat 3, 4, 6, 7)
   col 2 - "Original E-Cig"  (cat 2, 5)
   col 3 - "Cigarettes"      (cat 1)
@@ -735,7 +659,7 @@ The 5 destination groups collapse the 8-category scheme:
   col 5 - "E-Cig"           (cat 2, 3, 4, 5, 6, 7) = col 1 + col 2
 
 Returns:
-- paths:    Matrix{Float64} of size (max_horizon × 5).
+- paths:    Matrix of size (max_horizon × 5).
             Columns: [flav_ecig_share, orig_ecig_share, cig_share, outside_share, ecig_share]
             The first 4 columns sum to 1. Column 5 = column 1 + column 2.
 - n_events: Number of qualifying event observations found
@@ -753,8 +677,6 @@ function compute_post_purchase_paths(
     N_obs = length(y_vec)
 
     # Build a (household_code, period_index) → observation_index lookup table.
-    # We use a hash map rather than nested loops because we need to look up arbitrary
-    # future periods (period_i + h) for each event observation; each lookup is then O(1).
     hh_period_lookup = Dict{Tuple{eltype(hh_codes), Int}, Int}()
     for i in 1:N_obs
         hh_period_lookup[(hh_codes[i], period_idx[i])] = i
@@ -789,14 +711,13 @@ function compute_post_purchase_paths(
         # than 12 months remain). The same household can contribute zero, one,
         # or many qualifying events depending on event timing.
         #
-        # Why require complete paths? The destination shares at each horizon h
-        # are computed across all qualifying events. If we allowed incomplete
+        # The destination shares at each horizon h
+        # are computed across all qualifying events. If I allowed incomplete
         # paths, the set of events contributing to h=1 would be larger than
         # those contributing to h=12 (only events with at least 12 forward
         # months observed). Destination shares at different horizons would then
         # be computed on different events, making horizon-to-horizon comparisons
-        # misleading. Restricting to complete paths ensures the same set of
-        # events contributes to every horizon h = 1, ..., max_horizon.
+        # misleading. 
         #
         # There is also a selection concern: households that drop out before
         # max_horizon may do so for non-random reasons (e.g., they quit all
@@ -861,11 +782,11 @@ end
 
 """
 Run S simulation draws and compute averaged post-purchase destination paths,
-separately for all households, TYA households, and non-TYA households.
+separately for all households and TYA households.
 
 For each draw:
   1. Simulate choice sequences via `simulate_household_sequences_mixture`
-  2. Compute post-purchase paths for all, TYA, and non-TYA subgroups
+  2. Compute post-purchase paths for all and TYA subgroups
   3. Accumulate path matrices
 
 After S draws, average the accumulated paths element-wise.
@@ -873,13 +794,10 @@ After S draws, average the accumulated paths element-wise.
 Returns a NamedTuple with:
 - paths_all:        Matrix (max_horizon × 5) averaged simulated paths, all HH
 - paths_tya:        Matrix (max_horizon × 5) averaged simulated paths, TYA HH
-- paths_no_tya:     Matrix (max_horizon × 5) averaged simulated paths, no-TYA HH
 - paths_all_ci:     Matrix (max_horizon × 10) CI bounds [p025_c1, p975_c1, ..., p025_c5, p975_c5]
 - paths_tya_ci:     Matrix (max_horizon × 10) CI bounds
-- paths_no_tya_ci:  Matrix (max_horizon × 10) CI bounds
 - n_events_all:     Number of qualifying events (from first draw, for reference)
 - n_events_tya:     Number of qualifying events for TYA subgroup
-- n_events_no_tya:  Number of qualifying events for no-TYA subgroup
 
 Columns are always: [flav_ecig_share, orig_ecig_share, cig_share, outside_share, ecig_share]
 
@@ -915,33 +833,28 @@ function run_post_purchase_path_validation(
     max_horizon::Integer = 12
 )
 
-    # Boolean masks identifying which observations are TYA months (tya_state == 2)
-    # and which are non-TYA months (tya_state == 1). Passed to compute_post_purchase_paths
-    # via obs_mask to restrict which purchase events are counted in subgroup analyses.
-    mask_tya    = [tya_state[i] == 2 for i in eachindex(tya_state)]
-    mask_no_tya = [tya_state[i] == 1 for i in eachindex(tya_state)]
+    # Mask identifying which observations are TYA months (tya_state == 2).
+    # Passed to compute_post_purchase_paths via obs_mask to restrict which purchase
+    # events are counted in the TYA subgroup analysis.
+    mask_tya = [tya_state[i] == 2 for i in eachindex(tya_state)]
 
     # Running sums of destination share matrices across S draws, one per subgroup.
     # compute_post_purchase_paths returns a (max_horizon × 5) matrix where entry
     # [h, c] is the share of qualifying events that ended up in destination category
-    # c at h months after the source purchase. We sum these matrices across all S
+    # c at h months after the source purchase. I sum these matrices across all S
     # draws and divide by S at the end to get the element-wise average.
     acc_all    = zeros(Float64, max_horizon, 5)
     acc_tya    = zeros(Float64, max_horizon, 5)
-    acc_no_tya = zeros(Float64, max_horizon, 5)
 
     # Per-draw path share matrices stored for confidence band computation.
     # draw_paths_all[h, c, s] = destination share for category c at horizon h in draw s.
-    # Initialized to NaN so draws with no qualifying events are identifiable.
     draw_paths_all    = fill(NaN, max_horizon, 5, S)
     draw_paths_tya    = fill(NaN, max_horizon, 5, S)
-    draw_paths_no_tya = fill(NaN, max_horizon, 5, S)
 
     # Event counts are stable across draws (they depend on observed choices and
-    # panel structure, not the simulated sequences), so we record them from draw 1.
+    # panel structure, not the simulated sequences), so I record them from draw 1.
     ref_n_events_all    = 0
     ref_n_events_tya    = 0
-    ref_n_events_no_tya = 0
 
     for s in 1:S
 
@@ -953,8 +866,7 @@ function run_post_purchase_path_validation(
         # across draws, producing S independent simulated choice sequences.
         rng = MersenneTwister(base_seed + s)
 
-        # Simulate a full choice sequence for every household using the K=3 mixture
-        # model. Each household is assigned a type by drawing from its posterior,
+        # Simulate a full choice sequence for every household . Each household is assigned a type by drawing from its posterior,
         # and choices are drawn month-by-month with addiction stocks evolving from
         # the simulated choices (not the observed choices).
         sim_y = simulate_household_sequences_mixture(
@@ -984,22 +896,13 @@ function run_post_purchase_path_validation(
         acc_tya .+= paths_s_tya
         draw_paths_tya[:, :, s] .= paths_s_tya
 
-        # Same for non-TYA-only events.
-        paths_s_no_tya, n_ev_no_tya = compute_post_purchase_paths(
-            sim_y, cat_idx, hh_codes, period_idx, source_cats;
-            obs_mask=mask_no_tya, max_horizon=max_horizon
-        )
-        acc_no_tya .+= paths_s_no_tya
-        draw_paths_no_tya[:, :, s] .= paths_s_no_tya
-
         # Record qualifying event counts from the first draw. These are determined
         # by the observed panel structure (which households had source-category
         # purchases with 12 consecutive forward months), not by the simulated choices,
-        # so they are identical across all S draws and we only need to record them once.
+        # so they are identical across all S draws and I only need to record them once.
         if s == 1
             ref_n_events_all    = n_ev_all
             ref_n_events_tya    = n_ev_tya
-            ref_n_events_no_tya = n_ev_no_tya
         end
     end
 
@@ -1009,17 +912,12 @@ function run_post_purchase_path_validation(
     # months after the source purchase, averaged over S simulation draws.
     avg_all    = acc_all    ./ S
     avg_tya    = acc_tya    ./ S
-    avg_no_tya = acc_no_tya ./ S
 
     # Compute 95% empirical confidence bands from the S per-draw path share matrices.
     # draw_paths is (max_horizon × 5 × S). For each horizon h and destination
-    # category c, we have S values, one per draw. The confidence band is the
-    # 2.5th and 97.5th percentile of those S values, computed by sorting and indexing.
-    # Draws with no qualifying events produce NaN and are excluded before sorting.
-    # If fewer than 2 valid draws exist, the CI is returned as NaN.
+    # category c, I have S values, one per draw. 
     #
-    # Output layout: the CI matrix has 2*N_cols columns, interleaved as
-    # [p025_c1, p975_c1, p025_c2, p975_c2, ..., p025_c5, p975_c5].
+    # If fewer than 2 valid draws exist, the CI is returned as NaN.
     function compute_ppp_ci(draw_paths::Array{Float64, 3})
         N_cols = size(draw_paths, 2)
         ci = Matrix{Float64}(undef, max_horizon, 2 * N_cols)
@@ -1044,17 +942,13 @@ function run_post_purchase_path_validation(
 
     ci_all    = compute_ppp_ci(draw_paths_all)
     ci_tya    = compute_ppp_ci(draw_paths_tya)
-    ci_no_tya = compute_ppp_ci(draw_paths_no_tya)
 
     return (
         paths_all        = avg_all,
         paths_tya        = avg_tya,
-        paths_no_tya     = avg_no_tya,
         paths_all_ci     = ci_all,
         paths_tya_ci     = ci_tya,
-        paths_no_tya_ci  = ci_no_tya,
         n_events_all     = ref_n_events_all,
-        n_events_tya     = ref_n_events_tya,
-        n_events_no_tya  = ref_n_events_no_tya
+        n_events_tya     = ref_n_events_tya
     )
 end
