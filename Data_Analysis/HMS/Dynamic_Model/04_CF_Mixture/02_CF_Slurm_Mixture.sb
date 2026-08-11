@@ -50,7 +50,7 @@
 #SBATCH --mem-per-cpu=5gb
 
 ### REQUIRED. Specify the time required for this job, hhh:mm:ss
-#SBATCH --time=024:00:00
+#SBATCH --time=012:00:00
 
 
 # --------------------------------------------------------------
@@ -63,20 +63,20 @@
 # Flags:
 #   ESTIMATE_PSI_3 (default: false)  Load ψ_3-estimated model results (27-param)
 #   PSI_3          (default: 0.75)   Fixed ψ_3 value (ignored when ESTIMATE_PSI_3=true)
-#
-# β is swept internally over BETA_GRID = [0.70, 1.0]; no BETA flag needed.
+#   BETA           (default: 1.0)    Present-bias β for this CF run
 #
 # Usage examples:
-#   Base model (ψ_3=0.75 fixed):
+#   Default (ψ_3=0.75 fixed, β=1.0):
 #     sbatch 02_CF_Slurm_Mixture.sb
+#
+#   With β=0.70:
+#     BETA=0.70 sbatch 02_CF_Slurm_Mixture.sb
 #
 #   With estimated ψ_3:
 #     ESTIMATE_PSI_3=true sbatch 02_CF_Slurm_Mixture.sb
-#
-#   With fixed ψ_3=0.50:
-#     PSI_3=0.50 sbatch 02_CF_Slurm_Mixture.sb
 export ESTIMATE_PSI_3=${ESTIMATE_PSI_3:-false}
 export PSI_3=${PSI_3:-0.75}
+export BETA=${BETA:-1.0}
 
 
 # --------------------------------------------------------------
