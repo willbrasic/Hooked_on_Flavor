@@ -32,7 +32,7 @@ Julia scripts are parallelized and are designed to run on a SLURM HPC cluster. E
 .
 ├── Data_Cleaning/
 │   └── HMS/
-│       └── 2021-Onward/                          # Raw HMS data cleaning pipeline (R)
+│       └── 2021-Onward/                           # Raw HMS data cleaning pipeline (R)
 └── Data_Analysis/
     └── HMS/
         ├── Summary_Stats/                         # Descriptive statistics (R)
