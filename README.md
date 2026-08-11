@@ -8,9 +8,9 @@ wbrasic@arizona.edu
 
 ## Overview
 
-This repository contains the code for [*Hooked on Flavor: Addiction, Present Bias, and the Consequences of E-Cigarette Flavor Policy*](https://williambrasic.com/Research/JMP_20260611.pdf), studying tobacco product demand with a focus on flavored e-cigarette regulation. The paper estimates a **finite mixture dynamic discrete choice model** of household tobacco demand using Nielsen Homescan (HMS) panel data from 2021-2023. The model captures addiction dynamics, habit formation, preference heterogeneity across latent household types, and the role of teens and young adults (TYA) in driving flavored e-cigarette adoption.
+This repository contains the code for [*Hooked on Flavor: Addiction, Present Bias, and the Consequences of E-Cigarette Flavor Policy*](https://williambrasic.com/Research/JMP_20260611.pdf), examining how flavored e-cigarette regulations affect addiction and consumer behavior through a dynamic structural model. The paper estimates a finite mixture dynamic model of addiction for cigarette and e-cigarette demand using Nielsen Homescan (HMS) panel data from 2021-2023. The model captures addiction dynamics, habit formation, preference heterogeneity across latent household types, and the role of teens and young adults (TYA) in driving flavored e-cigarette adoption.
 
-The counterfactual analysis evaluates the welfare and public health effects of several FDA flavor regulation policies, including comprehensive flavor bans, FDA-authorized product restrictions, and per-mL flavor taxes.
+The counterfactual analysis evaluates the welfare and public health effects of several FDA flavor regulation policies, including comprehensive flavor bans, FDA-unauthorized product restrictions, and per-mL flavor taxes.
 
 ---
 
@@ -21,11 +21,6 @@ The underlying data are from the **Nielsen Homescan (HMS) Consumer Panel** (2021
 ---
 
 ## Languages and Dependencies
-
-| Language | Version | Key Packages |
-|----------|---------|--------------|
-| R | ≥ 4.2 | `data.table`, `fixest`, `plm`, `sandwich`, `stargazer`, `ggplot2`, `pacman` |
-| Julia | ≥ 1.9 | `Optim`, `ForwardDiff`, `LinearAlgebra`, `Distributions`, `CSV`, `DataFrames`, `SharedArrays` |
 
 Julia scripts are parallelized and are designed to run on a SLURM HPC cluster. Each subfolder containing a `.sb` file includes the corresponding SLURM submission script.
 
@@ -98,33 +93,11 @@ Reduced-form empirical evidence motivating key features of the structural model.
 
 ---
 
-## Figure Creation
-
-### `Data_Analysis/HMS/Figure_Creation/`
-
-Produces all publication-ready figures in the paper and appendix.
-
-| Script | Description |
-|--------|-------------|
-| `01_Cig_ECig_Consumption_Time_Plot.R` | Time series of cigarette and e-cigarette consumption levels across the sample period |
-| `02_Cig_ECig_FE_Time_Plot.R` | Fixed-effects time trends for cigarette and e-cigarette purchases, netting out household-level heterogeneity |
-| `03_ECig_Flavored_UnFlavored_Frequencies_Plot.R` | Purchase frequency distributions comparing flavored vs. unflavored e-cigarette household-months |
-| `04_Cig_ECig_Frequencies_Plot.R` | Joint frequency plot of cigarette and e-cigarette purchase incidence |
-| `05_Cig_ECig_Prices_Time_Plot.R` | Time series of average prices for cigarettes and e-cigarettes |
-| `06_ECig_Flavored_Unflavored_Shares_Plot.R` | Market share evolution of flavored vs. unflavored e-cigarettes over time |
-| `07_ECig_FDA_Authorized_Frequencies_Plot.R` | Purchase frequency breakdown by FDA authorization status of e-cigarette products |
-| `08_Streak_Persistence_Plot.R` | Visualization of purchase streak persistence from the relapse analysis |
-| `A_01_Category_Shares_Plot.R` | Category-level market share breakdown across all tobacco product types |
-| `A_02_Cig_ECig_Prices_Bins_Plot.R` | Price distributions for cigarettes and e-cigarettes using binned histograms |
-| `A_02_Cig_Ecig_Frequencies_TYA_Plot.R` | Purchase frequency comparison split by TYA household presence |
-
----
-
 ## Dynamic Model
 
 ### `Data_Analysis/HMS/Dynamic_Model/`
 
-The core structural estimation pipeline. All scripts are written in Julia and parallelized for use on an HPC. The model is a **finite mixture dynamic discrete choice model** of tobacco demand estimated by maximum likelihood. Each latent type has its own preference parameters, and households are probabilistically assigned to types via thier posterior probabilities. Value functions are solved by value function iteration (VFI) over a discretized addiction stock state space.
+The core structural estimation pipeline. All scripts are written in Julia and parallelized for use on an HPC.
 
 ---
 
@@ -152,7 +125,7 @@ Estimates the structural parameters of the K=3 mixture dynamic discrete choice m
 
 | Script | Description |
 |--------|-------------|
-| `01_Functions_Mixture.jl` | Core functions: VFI solver, likelihood contributions, mixture posterior weights, and auxiliary utilities shared across estimation and counterfactual scripts |
+| `01_Functions_Mixture.jl` | Core functions: VFI solver, likelihood contributions, mixture posterior weights, and others shared across estimation and counterfactual scripts |
 | `02_Estimation_Mixture.jl` | Main estimation script. Solves the dynamic programming problem for each latent type and each point in the parameter search, evaluates the mixture likelihood, and optimizes over structural parameters using pseudo-Nelder-Mead optimizer. |
 | `02_Estimation_Mixture_Slurm.sb` | SLURM submission script for running estimation on the HPC. |
 | `03_Standard_Errors_Mixture.jl` | Computes standard errors for the MLE estimates via central finite differences. |
@@ -203,7 +176,6 @@ Counterfactual policy analysis. Re-solves the VFI under alternative regulatory r
 Policies analyzed:
 
 - **Comprehensive flavor ban**: removes all flavored e-cigarettes from the choice set
-- **FDA-authorized products only**: restricts the market to FDA-authorized e-cigarettes
 - **Non-FDA flavor ban**: bans only non-FDA-authorized flavored products
 - **Per-mL flavor tax**: implements per-mL excise tax on e-cigarettes
 
