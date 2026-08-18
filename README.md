@@ -8,7 +8,7 @@ wbrasic@arizona.edu
 
 ## Overview
 
-This repository contains the code for [*Hooked on Flavor: Addiction, Present Bias, and the Consequences of E-Cigarette Flavor Policy*](https://williambrasic.com/Research/JMP_20260611.pdf), examining how flavored e-cigarette regulations affect addiction and consumer behavior through a dynamic structural model. The paper estimates a finite mixture dynamic model of addiction for cigarette and e-cigarette demand using Nielsen Homescan (HMS) panel data from 2021-2023. The model captures addiction dynamics, habit formation, preference heterogeneity across latent household types, and the role of teens and young adults (TYA) in driving flavored e-cigarette adoption.
+This repository contains the code for [*Hooked on Flavor: Addiction, Present Bias, and the Consequences of E-Cigarette Flavor Policy*](https://drive.google.com/file/d/1QVyke0nyIxgv5jUvWM3OXV3niEwzh9I5/view?usp=drive_link), examining how flavored e-cigarette regulations affect addiction and consumer behavior through a dynamic structural model. The paper estimates a finite mixture dynamic model of addiction for cigarette and e-cigarette demand using Nielsen Homescan (HMS) panel data from 2021-2023. The model captures addiction dynamics, habit formation, preference heterogeneity across latent household types, and the role of teens and young adults (TYA) in driving flavored e-cigarette adoption.
 
 The counterfactual analysis evaluates the welfare and public health effects of several FDA flavor regulation policies, including comprehensive flavor bans, FDA-unauthorized product restrictions, and per-mL flavor taxes.
 
@@ -97,7 +97,7 @@ Reduced-form empirical evidence motivating key features of the structural model.
 
 ### `Data_Analysis/HMS/Dynamic_Model/`
 
-The core structural estimation pipeline. All scripts are written in Julia and parallelized for use on an HPC.
+The core structural estimation code. All scripts are written in Julia and parallelized for use on an HPC.
 
 ---
 
@@ -121,7 +121,7 @@ Prepares the inputs needed for structural estimation: price processes, state tra
 
 ### `02_Second_Stage_Estimation_Mixture/`
 
-Estimates the structural parameters of the K=3 mixture dynamic discrete choice model via maximum likelihood. 
+Estimates the structural parameters of the dynamic mixture model via maximum likelihood. 
 
 | Script | Description |
 |--------|-------------|
