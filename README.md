@@ -8,9 +8,9 @@ wbrasic@arizona.edu
 
 ## Overview
 
-This repository contains the code for [*Hooked on Flavor: Addiction, Present Bias, and the Consequences of E-Cigarette Flavor Policy*](https://drive.google.com/file/d/1QVyke0nyIxgv5jUvWM3OXV3niEwzh9I5/view?usp=drive_link), examining how flavored e-cigarette regulations affect addiction and consumer behavior through a dynamic structural model. The paper estimates a finite mixture dynamic model of addiction for cigarette and e-cigarette demand using Nielsen Homescan (HMS) panel data from 2021-2023. The model captures addiction dynamics, habit formation, preference heterogeneity across latent household types, and the role of teens and young adults (TYA) in driving flavored e-cigarette adoption.
+This repository contains the code for [*Hooked on Flavor: Addiction, Present Bias, and the Consequences of E-Cigarette Flavor Policy*](https://drive.google.com/file/d/1QVyke0nyIxgv5jUvWM3OXV3niEwzh9I5/view?usp=drive_link), examining how flavored e-cigarette regulations affect addiction and consumer behavior through a dynamic structural model using Nielsen Homescan (HMS) panel data from 2021-2023. The model features addiction and flavor stocks, heterogeneous flavor preferences by household age composition, and unobserved heterogeneity.
 
-The counterfactual analysis evaluates the welfare and public health effects of several FDA flavor regulation policies, including comprehensive flavor bans, FDA-unauthorized product restrictions, and per-mL flavor taxes.
+The counterfactual analysis evaluates the addiction and consumer surplus effects of several FDA flavor regulation policies, including comprehensive flavor bans, FDA-unauthorized product restrictions, and per-mL flavor taxes.
 
 ---
 
@@ -126,7 +126,7 @@ Estimates the structural parameters of the dynamic mixture model via maximum lik
 | Script | Description |
 |--------|-------------|
 | `01_Functions_Mixture.jl` | Core functions: VFI solver, likelihood contributions, mixture posterior weights, and others shared across estimation and counterfactual scripts |
-| `02_Estimation_Mixture.jl` | Main estimation script. Solves the dynamic programming problem for each latent type and each point in the parameter search, evaluates the mixture likelihood, and optimizes over structural parameters using pseudo-Nelder-Mead optimizer. |
+| `02_Estimation_Mixture.jl` | Main estimation script. Solves the dynamic programming problem for each latent type and each point in the parameter search, evaluates the mixture likelihood, and optimizes over structural parameters using quasi-Nelder-Mead optimizer. |
 | `02_Estimation_Mixture_Slurm.sb` | SLURM submission script for running estimation on the HPC. |
 | `03_Standard_Errors_Mixture.jl` | Computes standard errors for the MLE estimates via central finite differences. |
 | `03_Standard_Errors_Mixture_Slurm.sb` | SLURM submission script for the standard errors computation. |
