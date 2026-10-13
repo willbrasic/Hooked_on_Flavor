@@ -42,8 +42,6 @@ Data cleaning, first-stage estimation, and the reduced-form evidence are in R. T
             ├── 01_First_Stage_Estimation/
             ├── 02_Second_Stage_Estimation_Mixture/
             ├── 02_Second_Stage_Estimation_Mixture_Holdout/
-            ├── 02_Second_Stage_Estimation_Mixture_LongRun/
-            ├── 02_Second_Stage_Estimation_Mixture_Holdout_LongRun/
             ├── 03_Standard_Errors_Mixture/
             ├── 04_Validation_Mixture/
             ├── 04_Validation_Mixture_Holdout/
@@ -154,22 +152,14 @@ Estimates the structural model on the holdout sample for out-of-sample validatio
 
 ---
 
-### `02_Second_Stage_Estimation_Mixture_LongRun/` and `02_Second_Stage_Estimation_Mixture_Holdout_LongRun/`
-
-Same scripts as the multi-start folders, but `02_Estimation_Mixture.jl` runs a single long Nelder-Mead run (`long_amoeba`) from the starting parameters, meant to polish the best inner try of the multi-start estimation. Outputs carry a `LongRun` tag.
-
----
-
 ### `03_Standard_Errors_Mixture/`
 
-Computes standard errors for the MLE estimates via central finite differences on the full negative log-likelihood. Each script includes the functions file of the estimation folder it serves and writes `_SE.csv` and `_VCov.csv` into that folder's results directory.
+Computes standard errors for the MLE estimates via central finite differences on the full negative log-likelihood, writing `_SE.csv` and `_VCov.csv` into the estimation results directory.
 
 | Script | Description |
 |--------|-------------|
-| `01_Standard_Errors_Mixture.jl` | Standard errors for the `02_Second_Stage_Estimation_Mixture` estimates |
+| `01_Standard_Errors_Mixture.jl` | Standard errors for the estimates from `02_Second_Stage_Estimation_Mixture` |
 | `01_Standard_Errors_Mixture_Slurm.sb` | SLURM submission script |
-| `02_Standard_Errors_Mixture_LongRun.jl` | Standard errors for the `02_Second_Stage_Estimation_Mixture_LongRun` estimates |
-| `02_Standard_Errors_Mixture_LongRun_Slurm.sb` | SLURM submission script |
 
 ---
 
