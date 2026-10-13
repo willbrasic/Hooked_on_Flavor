@@ -12,16 +12,16 @@
 ################################################################################
 # Table of Contents
 #
-#  1. Preliminaries           
-#  2. Logging                
-#  3. Data Loading: Choices                                  
-#  4. Data Loading: Alternative Attributes                                                                       
-#  5. Data Loading: Demographics                           
-#  6. Data Loading: Prices                                                                                                 
-#  7. Addiction Dynamics                                      
-#  8. Value Function Iteration   
-#  9. Likelihood & Prediction                                                              
-# 10. Optimization & Objective                               
+#  1. Preliminaries
+#  2. Logging
+#  3. Data Loading: Choices
+#  4. Data Loading: Alternative Attributes
+#  5. Data Loading: Demographics
+#  6. Data Loading: Prices
+#  7. Addiction Dynamics
+#  8. Value Function Iteration
+#  9. Likelihood & Prediction
+# 10. Optimization & Objective
 ################################################################################
 
 
@@ -230,12 +230,12 @@ This keeps utility terms at reasonable magnitudes for numerical stability.
 Alternative ordering:
   j = 1:           outside option (zero consumption)
   j = 2:13:        12 cigarette quantity bins
-  j = 14:20:       7 original e-cigarette bins
-  j = 21:27:       7 non-FDA flavored e-cigarette bins
-  j = 28:34:       7 FDA flavored e-cigarette bins
-  j = 35:38:       4 original bundles (ll/lh/hl/hh: lo/hi cig x lo/hi ecig)
-  j = 39:42:       4 non-FDA flavored bundles (ll/lh/hl/hh: lo/hi cig x lo/hi ecig)
-  j = 43:46:       4 FDA flavored bundles (ll/lh/hl/hh: lo/hi cig x lo/hi ecig)
+  j = 14:21:       8 original e-cigarette bins
+  j = 22:29:       8 non-FDA flavored e-cigarette bins
+  j = 30:37:       8 FDA flavored e-cigarette bins
+  j = 38:41:       4 original bundles (ll/lh/hl/hh: lo/hi cig x lo/hi ecig)
+  j = 42:45:       4 non-FDA flavored bundles (ll/lh/hl/hh: lo/hi cig x lo/hi ecig)
+  j = 46:49:       4 FDA flavored bundles (ll/lh/hl/hh: lo/hi cig x lo/hi ecig)
 
 Returns:
 - N_cig:               Number of cigarette alternatives
@@ -272,7 +272,7 @@ function get_consumption(
         "bundle_fda_ll",  "bundle_fda_lh",  "bundle_fda_hl",  "bundle_fda_hh"
     ]
 
-    # Helper to extract single consumption value by alternative name
+    # Pull a single consumption value by alternative name
     get_consumption_value(alt_name) = only(df.consumption[df.alternative .== alt_name])
 
     # Counts
@@ -558,33 +558,9 @@ end
 #############################
 
 """
-Get indicators for whether teen or young adult is present in the household.
-
-Returns:
-- Number of unique households
-- Vector of ones and zeros indicating whether a given household has a teen or young adult present
-"""
-function get_teen_young_adult(
-    file_name::AbstractString = "./Teen_Young_Adult.csv"
-)
-
-    # Load in teen or young adult indicator for each household-month
-    df_tya = CSV.read(file_name, DataFrame)
-
-    # Vector of indicators for each household for each month they are in the panel
-    tya = Vector(df_tya[:, 3])
-
-    # Unique households
-    N_HH = length(unique(df_tya.household_code))
-
-    return N_HH, tya
-end
-
-
-"""
 Get TYA classification for each observation.
 
-Loads pre-computed TYA state assignments 
+Loads pre-computed TYA state assignments
 
 Returns:
 - tya_state: Vector{Int} of binary state values (0 = no TYA, 1 = TYA present) for each observation
@@ -602,7 +578,7 @@ end
 Compute household-level TYA share (fraction of months with TYA present).
 
 Reads TYA_States.csv which has columns (household_code, purchase_month,
-tya_state). 
+tya_state).
 
 For each household, computes share_h = (# of months with TYA present) / (# of total months in panel)
 
@@ -770,13 +746,13 @@ function get_price_ratios(
     ratio_cig  = ones(Float64, N_J)
     ratio_ecig = ones(Float64, N_J)
 
-    # Cig bin names 
+    # Cig bin names
     cig_names = ["cig_1", "cig_2", "cig_3to4", "cig_5to9", "cig_10", "cig_11to19",
                  "cig_20", "cig_21to29", "cig_30", "cig_31to39", "cig_40", "cig_41plus"]
 
     # Ecig bin names (pooled orig/flav, single ecig price state)
     ecig_names = ["ecig_0to5", "ecig_5to10", "ecig_10to15", "ecig_15to20",
-                  "ecig_20to30", "ecig_30to50", "ecig_50plus"]
+                  "ecig_20to30", "ecig_30to50", "ecig_50to100", "ecig_100plus"]
 
     # Fill ratio vectors following the alternative ordering:
     # j=1: outside option (ratios stay 1.0)
@@ -788,19 +764,19 @@ function get_price_ratios(
         idx += 1
     end
 
-    # j=14:20: original e-cig bins (use pooled ecig ratios)
+    # original e-cig bins (use pooled ecig ratios)
     for name in ecig_names
         ratio_ecig[idx] = ratio_lookup[name]
         idx += 1
     end
 
-    # j=21:27: non-FDA flavored e-cig bins (same pooled ecig ratios)
+    # non-FDA flavored e-cig bins (same pooled ecig ratios)
     for name in ecig_names
         ratio_ecig[idx] = ratio_lookup[name]
         idx += 1
     end
 
-    # j=28:34: FDA flavored e-cig bins (same pooled ecig ratios)
+    # FDA flavored e-cig bins (same pooled ecig ratios)
     for name in ecig_names
         ratio_ecig[idx] = ratio_lookup[name]
         idx += 1
@@ -808,9 +784,9 @@ function get_price_ratios(
 
     # Standalone bin index ranges (for matching bundle consumption to closest bin)
     cig_range  = 2:(1 + N_cig)                           # j=2:13
-    ecig_range = (2 + N_cig):(1 + N_cig + N_orig_ecig)   # j=14:20 (same ratios as all ecig bins)
+    ecig_range = (2 + N_cig):(1 + N_cig + N_orig_ecig)   # (same ratios as all ecig bins)
 
-    # j=35:46: bundles, mapped to the closest standalone bin's ratio by consumption
+    # j=38:49: bundles, mapped to the closest standalone bin's ratio by consumption
     for j in idx:N_J
         # Cig component: find standalone cig bin with closest consumption
         if q_cig[j] > 0.0
@@ -1009,8 +985,9 @@ end
 Map observed household prices to the nearest combined price grid index to
 get the observed price state for each observation for likelihood computation.
 
-For the dynamic model's price state, I compute a representative price per
-category by taking the median across bins.
+The representative price per category is the market price from which the bin
+prices in Prices.csv are built (market_cig, market_ecig). If those columns are
+absent (older files), the median across bins is used instead.
 
 Combined grid ordering follows 04_State_Transitions.R:
   combined_idx = (cig_idx - 1) * N_P + ecig_idx
@@ -1018,9 +995,7 @@ where cig_idx varies slowly and ecig_idx varies fast.
 
 Returns:
 - p_state:      Vector of combined price grid indices for each observation
-- p_continuous: N × 2 matrix of representative (cig, ecig) prices for likelihood interpolation
-- P_obs_cig:    N × N_J matrix of actual cig price for each obs-alternative pair (0 if no cig component)
-- P_obs_ecig:   N × N_J matrix of actual ecig price for each obs-alternative pair (0 if no ecig component)
+- p_continuous: N × 2 matrix of market (cig, ecig) prices for likelihood interpolation
 """
 function map_prices_to_grid(
     N_P::Integer,
@@ -1042,7 +1017,12 @@ function map_prices_to_grid(
     cig_cols = [:cig_1_p, :cig_2_p, :cig_3to4_p, :cig_5to9_p, :cig_10_p, :cig_11to19_p,
                 :cig_20_p, :cig_21to29_p, :cig_30_p, :cig_31to39_p, :cig_40_p, :cig_41plus_p]
     ecig_cols = [:ecig_0to5_p, :ecig_5to10_p, :ecig_10to15_p, :ecig_15to20_p,
-                 :ecig_20to30_p, :ecig_30to50_p, :ecig_50plus_p]
+                 :ecig_20to30_p, :ecig_30to50_p, :ecig_50to100_p, :ecig_100plus_p]
+    N_cig_bins  = length(cig_cols)
+    N_ecig_bins = length(ecig_cols)
+
+    # Market-price columns present?
+    has_market = ("market_cig" in names(df_prices)) && ("market_ecig" in names(df_prices))
 
     # Initialize outputs
     p_state      = Vector{Int}(undef, N)
@@ -1051,9 +1031,16 @@ function map_prices_to_grid(
     # Map each observation to nearest grid point
     for i in 1:N
 
-        # Representative per-category price: median across bins
-        obs_cig  = median([df_prices[i, c] for c in cig_cols])
-        obs_ecig = median([df_prices[i, c] for c in ecig_cols])
+        # Representative per-category price: the market price the bin prices are built
+        # from (market_cig / market_ecig columns written by 01_Data_Prep.R). Older
+        # Prices.csv files without those columns fall back to the median across bins.
+        if has_market
+            obs_cig  = df_prices[i, :market_cig]
+            obs_ecig = df_prices[i, :market_ecig]
+        else
+            obs_cig  = median([df_prices[i, c] for c in cig_cols])
+            obs_ecig = median([df_prices[i, c] for c in ecig_cols])
+        end
 
         # Store continuous prices (for interpolation in likelihood)
         p_continuous[i, 1] = obs_cig
@@ -1067,47 +1054,7 @@ function map_prices_to_grid(
         p_state[i] = (cig_idx - 1) * N_P + ecig_idx
     end
 
-    # Build full observation × alternative price matrices for the P_obs correction in the likelihood.
-    # The VFI uses p_continuous[i,1] as the effective cig price for all alternatives at obs i; the correction
-    # replaces this with the actual bin-specific price P_obs[i,j] from Prices.csv.
-    # P_obs_cig[i,j]  = actual cig price for obs i, alternative j (0 for non-cig alternatives)
-    # P_obs_ecig[i,j] = actual ecig price for obs i, alternative j (0 for non-ecig alternatives)
-    P_obs_cig  = zeros(Float64, N, N_J)
-    P_obs_ecig = zeros(Float64, N, N_J)
-
-    # j=2:13: standalone cig bins
-    for (b, col) in enumerate(cig_cols)
-        j = 1 + b   # j=2 through j=13
-        for i in 1:N
-            P_obs_cig[i, j] = df_prices[i, col]
-        end
-    end
-
-    # j=14:34: standalone ecig bins (orig, non-FDA flav, FDA flav all share pooled ecig prices)
-    for (b, col) in enumerate(ecig_cols)
-        for i in 1:N
-            P_obs_ecig[i, 13 + b] = df_prices[i, col]   # j=14:20 orig ecig
-            P_obs_ecig[i, 20 + b] = df_prices[i, col]   # j=21:27 non-FDA flav ecig
-            P_obs_ecig[i, 27 + b] = df_prices[i, col]   # j=28:34 FDA flav ecig
-        end
-    end
-
-    # j=35:46: bundle alternatives (separate cig and ecig component prices)
-    bundle_cig_cols  = [:bundle_orig_ll_cig_p, :bundle_orig_lh_cig_p, :bundle_orig_hl_cig_p, :bundle_orig_hh_cig_p,
-                        :bundle_nfda_ll_cig_p, :bundle_nfda_lh_cig_p, :bundle_nfda_hl_cig_p, :bundle_nfda_hh_cig_p,
-                        :bundle_fda_ll_cig_p,  :bundle_fda_lh_cig_p,  :bundle_fda_hl_cig_p,  :bundle_fda_hh_cig_p]
-    bundle_ecig_cols = [:bundle_orig_ll_ecig_p, :bundle_orig_lh_ecig_p, :bundle_orig_hl_ecig_p, :bundle_orig_hh_ecig_p,
-                        :bundle_nfda_ll_ecig_p, :bundle_nfda_lh_ecig_p, :bundle_nfda_hl_ecig_p, :bundle_nfda_hh_ecig_p,
-                        :bundle_fda_ll_ecig_p,  :bundle_fda_lh_ecig_p,  :bundle_fda_hl_ecig_p,  :bundle_fda_hh_ecig_p]
-    for (b, (ccol, ecol)) in enumerate(zip(bundle_cig_cols, bundle_ecig_cols))
-        j = 34 + b   # j=35 through j=46
-        for i in 1:N
-            P_obs_cig[i, j]  = df_prices[i, ccol]
-            P_obs_ecig[i, j] = df_prices[i, ecol]
-        end
-    end
-
-    return p_state, p_continuous, P_obs_cig, P_obs_ecig
+    return p_state, p_continuous
 end
 
 
@@ -1178,14 +1125,40 @@ function addiction_evolution(
 end
 
 
+# Cache for the bin price ratios used inside get_flow_utility (loaded once per N_J)
+const _PRICE_RATIO_CACHE = Dict{Int, Tuple{Vector{Float64}, Vector{Float64}}}()
+
+"""
+Return the bin price ratio vectors for the flow utility, loading Price_Ratios.csv from
+the working directory the first time and caching the result. The bin counts per
+category are recovered from cat_idx (1 = cig, 2 = orig ecig, 3 = non-FDA flavored,
+4 = FDA flavored), so callers need not pass them.
+"""
+function get_cached_price_ratios(
+    N_J::Integer,
+    cat_idx::AbstractVector{<:Integer},
+    q_cig::AbstractVector{<:Real},
+    q_ecig::AbstractVector{<:Real}
+)
+    if !haskey(_PRICE_RATIO_CACHE, N_J)
+        N_cig               = count(==(1), cat_idx)
+        N_orig_ecig         = count(==(2), cat_idx)
+        N_non_fda_flav_ecig = count(==(3), cat_idx)
+        N_fda_flav_ecig     = count(==(4), cat_idx)
+        r_cig, r_ecig = get_price_ratios(N_J, N_cig, N_orig_ecig, N_non_fda_flav_ecig, N_fda_flav_ecig, q_cig, q_ecig)
+        _PRICE_RATIO_CACHE[N_J] = (Vector{Float64}(r_cig), Vector{Float64}(r_ecig))
+    end
+    return _PRICE_RATIO_CACHE[N_J]
+end
+
 """
 Pre-compute flow utility for all (tya, alternative, addiction, flavored habit, price) states.
 
 The flow utility for alternative j given addiction state a, flavored habit a_flav,
 price state p, and TYA state is:
 
-  u(j,a,a_flav,p,tya) = α_C·q_cig[j] + α_E·q_ecig[j] + α_CE·q_cig[j]·q_ecig[j]
-                       + 1[flavored]·(λ_1 + λ_2·𝟙[tya]) 
+  u(j,a,a_flav,p,tya) = α_C·q_cig[j] + α_E·q_ecig[j] + α_E2·q_ecig[j]² + α_CE·q_cig[j]·q_ecig[j]
+                       + 1[flavored]·(λ_1 + λ_2·𝟙[tya])
                        + 1[FDA flavored]·(λ_3 + λ_4·𝟙[tya])
                        + γ_1·a·1[outside option]
                        + γ_2·a_flav·1[orig ecig/bundle inside]
@@ -1195,16 +1168,22 @@ price state p, and TYA state is:
                        + ξ_vec[j]
 
 
+α_E2·q_ecig[j]² is the curvature of e-liquid consumption utility.
 γ_1·a is withdrawal cost (outside option only).
 γ_2·a_flav·1[orig ecig/bundle inside] is a flavor lock-in penalty on orig ecig and orig bundle.
 γ_3·a_flav·1[cig or orig bundle] is a flavor lock-in penalty on standalone cigs and orig bundles
 γ_4·a_flav·1[outside option] is a flavored withdrawal cost on the outside option.
-ω_C·P_cig[p]·q_cig[j] is cigarette expenditure disutility.
-ω_E·P_ecig[p]·q_ecig[j] is e-cigarette expenditure disutility.
+ω_C·P_cig[p]·ratio_cig[j]·q_cig[j] is cigarette expenditure disutility.
+ω_E·P_ecig[p]·ratio_ecig[j]·q_ecig[j] is e-cigarette expenditure disutility.
 Bundles (cat 5-7) get BOTH price terms.
+ratio_cig[j], ratio_ecig[j] are the national bin price ratios (bin median per-unit
+price / overall median) from Price_Ratios.csv, so each alternative is priced at the
+market price times its quantity-discount ratio. Prices.csv is built the same way in
+01_Data_Prep.R, which is why no bin-specific price correction is needed in the
+likelihood. The ratios are loaded (and cached) automatically when not supplied.
 For the outside option (j = 1), all terms except γ_1·a and γ_4·a_flav are zero.
 
-θ = [α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E, ξ_C, ξ_E, ξ_CE].
+θ = [α_C, α_E, α_E2, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E, ξ_C, ξ_E, ξ_CE].
 
 
 Two-stock addiction model: the addiction level entering utility is the unweighted
@@ -1235,11 +1214,19 @@ function get_flow_utility(
     cat_idx::AbstractVector{<:Integer},
     Pcomb::AbstractMatrix{<:Real},
     has_cig::AbstractVector{Bool},
-    has_ecig::AbstractVector{Bool}
+    has_ecig::AbstractVector{Bool};
+    ratio_cig::Union{Nothing, AbstractVector{<:Real}} = nothing,
+    ratio_ecig::Union{Nothing, AbstractVector{<:Real}} = nothing
 )
 
-    # Unpack parameters (16-element θ: 13 common + 3 type-specific)
-    α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E, ξ_C, ξ_E, ξ_CE = θ
+    # Bin price ratios: load from Price_Ratios.csv (cached) unless supplied by the caller
+    if ratio_cig === nothing || ratio_ecig === nothing
+        ratio_cig, ratio_ecig = get_cached_price_ratios(N_J, cat_idx, q_cig, q_ecig)
+    end
+
+    # Unpack parameters (17-element θ: 14 common + 3 type-specific)
+    length(θ) == 17 || error("get_flow_utility expects a 17-element θ; got $(length(θ))")
+    α_C, α_E, α_E2, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E, ξ_C, ξ_E, ξ_CE = θ
 
     # Construct per-alternative fixed effect vector from category-level ξ parameters
     ξ_vec = zeros(Float64, N_J)
@@ -1278,9 +1265,9 @@ function get_flow_utility(
                     for j_idx in 1:N_J
 
                         # Components that do not depend on TYA state
-                        u_base = (α_C * q_cig[j_idx] + α_E * q_ecig[j_idx] + α_CE * q_bundle[j_idx]
-                                 + ω_C * Pcomb[p_idx, 1] * q_cig[j_idx]
-                                 + ω_E * Pcomb[p_idx, 2] * q_ecig[j_idx]
+                        u_base = (α_C * q_cig[j_idx] + α_E * q_ecig[j_idx] + α_E2 * q_ecig[j_idx]^2 + α_CE * q_bundle[j_idx]
+                                 + ω_C * Pcomb[p_idx, 1] * ratio_cig[j_idx]  * q_cig[j_idx]
+                                 + ω_E * Pcomb[p_idx, 2] * ratio_ecig[j_idx] * q_ecig[j_idx]
                                  + ξ_vec[j_idx])
 
                         # Withdrawal cost: γ_1·a applies only to the outside option.
@@ -1294,7 +1281,7 @@ function get_flow_utility(
                         # Flavor lock-in penalty for cig/orig bundle
                         u_base += γ_3 * A_flav[aflav_idx] * (has_cig[j_idx] && !is_flavored[j_idx])
 
-                        # Flavored withdrawal cost: γ_4·a_flav applies to outside option 
+                        # Flavored withdrawal cost: γ_4·a_flav applies to outside option
                         u_base += γ_4 * A_flav[aflav_idx] * is_outside[j_idx]
 
                         # Loop over binary TYA states (1 = no TYA, 2 = TYA present)
@@ -1571,7 +1558,7 @@ function logsumexp(
     # Factor out maximum to prevent overflow
     m = maximum(v)
 
-    # Guard against all-(-Inf) input: exp(-Inf - (-Inf)) = exp(NaN) = NaN
+    # If every entry is -Inf, return -Inf: exp(-Inf - (-Inf)) = exp(NaN) = NaN
     if m == -Inf
         return -Inf
     end
@@ -1796,7 +1783,7 @@ The interpolation brackets and weights are precomputed outside VFI:
 
 # Iteration Scheme
 Uses Jacobi-style iteration: the entire V_next array is computed from V_now,
-then V_now is replaced with V_next. 
+then V_now is replaced with V_next.
 
 # Post-Convergence Recomputation
 After convergence, V_d is recomputed one final time from the converged V_now.
@@ -2042,8 +2029,8 @@ function solve_vfi_sophisticated(
     # During the last VFI iteration, V_d was computed using V_now from the
     # *previous* iteration, but V_now was then updated to V_next. V_d is
     # therefore one iteration behind relative to the converged V_now.
-    # Recompute V_d one final time using the converged V_now to ensure
-    # exact consistency: V_d = U + βδ · EV(V_now_converged).
+    # Recompute V_d once more from the converged V_now so that it matches the
+    # fixed point: V_d = U + βδ · EV(V_now_converged).
     recompute_choice_values!(
         V_d, V_now, U, βδ,
         N_J, N_A_f, N_A_s, N_A_flav, N_P, N_Pcomb, inv_R,
@@ -2256,12 +2243,6 @@ function log_likelihood_mixture(
     as_continuous::AbstractVector{<:Real},
     aflav_continuous::AbstractVector{<:Real},
     p_continuous::AbstractMatrix{<:Real},
-    ω_C::Float64,
-    ω_E::Float64,
-    P_obs_cig::AbstractMatrix{<:Real},
-    P_obs_ecig::AbstractMatrix{<:Real},
-    q_cig::AbstractVector{<:Real},
-    q_ecig::AbstractVector{<:Real},
     hh_ranges::Vector{Tuple{Int, Int}}
 )
 
@@ -2298,9 +2279,9 @@ function log_likelihood_mixture(
         log_π_3_h   = logit_3_h - log_denom_h
 
         # Step 3: Compute per-type log-likelihood for this household.
-        # For each type k, I ask: "How well does type k's value function explain
-        # this household's entire purchase history?" I sum the log choice probability
-        # across all of the household's observed months:
+        # For each type k, sum the log choice probability of the household's observed
+        # choices across all of its months, using type k's value function:
+        #
         #   log L_k(h) = Σ_t log P(y_ht | state_ht; θ_k)
         # A type whose ξ values better match this household's purchasing pattern
         # produces higher choice probabilities, so a larger (less negative) log L_k.
@@ -2318,42 +2299,24 @@ function log_likelihood_mixture(
                 # Addiction stocks (af_continuous, as_continuous, aflav_continuous) are the
                 # actual continuous values simulated from the household's observed purchase history
                 # via simulate_addiction_trajectories, not grid approximations. No correction is
-                # needed for addiction because the flow utility terms involving addiction are 
+                # needed for addiction because the flow utility terms involving addiction are
                 # linear in the addiction stock, and linear interpolation recovers
                 # them exactly:
                 #   γ_1 * (w_lo * A_f[lo] + w_hi * A_f[hi]) = γ_1 * af_continuous[i]
                 # So the interpolation at the actual continuous addiction stock is exact.
                 #
-                # Prices (p_continuous[i,1], p_continuous[i,2]) are the household's median cig
-                # and ecig prices used as the interpolation coordinates. The correction
-                # below is needed because the flow utility baked into V uses p_continuous[i,1]
-                # as the effective cig price for all cig/bundle alternatives. This is a grid-based
-                # approximation that differs from the actual observed bin price P_obs_cig[i,j].
-                # Unlike addiction, P_obs_cig[i,j] varies across bins j and across households
-                # within the same price state in a way that the aggregate grid price cannot
-                # recover. P_obs_cig[i,j] from Prices.csv provides the actual price household
-                # i faces in bin j, restoring the full cross-sectional and time-series price
-                # variation needed to identify ω_C and ω_E.
+                # Prices (p_continuous[i,1], p_continuous[i,2]) are the household's market
+                # cig and ecig prices, the interpolation coordinates. The flow utility baked
+                # into V prices alternative j at market price × ratio_j × q_j, and the price
+                # term is linear in price, so interpolating at the household's market price
+                # reproduces its bin-specific prices exactly: Prices.csv holds the same
+                # market × ratio products. No further price correction is needed, and
+                # estimation and simulation price every alternative identically.
                 v_interp = interpolate_v_choice(
                     V_choices[k], tya_state[i], af_continuous[i], as_continuous[i],
                     aflav_continuous[i], p_continuous[i, 1], p_continuous[i, 2],
                     N_J, N_P, A_f, A_s, A_flav, P
                 )
-
-                # P_obs correction: nets out the baked-in grid price p_continuous[i] and
-                # replaces it with the actual bin-specific price P_obs_cig[i,j] from Prices.csv.
-                # Under the expenditure spec (ω*p*q), the net price term entering
-                # the likelihood becomes ω_C * P_obs_cig[i,j] * q_cig[j]. The correction
-                # is exact because price enters the flow utility linearly. The continuation
-                # value is unchanged: future price dynamics follow from the aggregate price
-                # state p_continuous[i], not from bin-specific prices.
-                # v_corrected[j] = v_interp[j]
-                #   + ω_C * (P_obs_cig[i,j]  - p_continuous[i,1]) * q_cig[j]
-                #   + ω_E * (P_obs_ecig[i,j] - p_continuous[i,2]) * q_ecig[j]
-                for j in 1:N_J
-                    v_interp[j] += ω_C * (P_obs_cig[i, j]  - p_continuous[i, 1]) * q_cig[j] +
-                                   ω_E * (P_obs_ecig[i, j] - p_continuous[i, 2]) * q_ecig[j]
-                end
 
                 # Log choice probability: log P(y_i) = V_choice(y_i) - logsumexp(V_choice)
                 # This is the standard logit formula from the T1EV error assumption
@@ -2363,7 +2326,7 @@ function log_likelihood_mixture(
 
         # Step 4: Integrate over types via logsumexp. This marginalizes over the
         # unobserved type. The model never commits a household to one type.
-        # Conceptually: L_h = π_1_h·L_1(h) + π_2_h·L_2(h) + π_3_h·L_3(h), i.e.,
+        # L_h = π_1_h·L_1(h) + π_2_h·L_2(h) + π_3_h·L_3(h), i.e.,
         # the weighted average likelihood across all three types. I compute this in
         # log space to avoid underflow when L_k(h) is a product of many small probs.
         mix_terms = [log_π_1_h + log_ll_k[1], log_π_2_h + log_ll_k[2], log_π_3_h + log_ll_k[3]]
@@ -2425,8 +2388,8 @@ function categorical_sample(
 
     # If floating-point rounding causes Σ probs < 1 so that
     # u exceeds the accumulated sum, return the last category. This
-    # can happen when probs doesn't sum to exactly 1.0 due to
-    # finite-precision arithmetic in the softmax computation.
+    # can happen when the softmax probabilities do not sum to exactly
+    # 1.0 in floating point.
     return length(probs)
 end
 
@@ -2438,24 +2401,25 @@ end
 
 
 # Economic parameter bounds (standardized units).
-# K=3 mixture ordering: [13 common, 3 type1, 3 type2, 3 type3, π_0_2, π_TYA_2, π_0_3, π_TYA_3] = 26 params
-# When ESTIMATE_PSI_3=true, ψ_3 is appended as param 27: bounds (0.01, 0.99)
-# Common: α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E
-# Type-specific (3 each): ξ_C_k, ξ_E_k, ξ_CE_k (k=1,2 unconstrained; k=3 lower bound -30 to prevent degenerate non-purchaser type)
+# K=3 mixture ordering: [14 common, 3 type1, 3 type2, 3 type3, π_0_2, π_TYA_2, π_0_3, π_TYA_3, ψ_3] = 28 params
+# ψ_3 is param 28 with bounds (0.01, 0.99), appended below
+# Common: α_C, α_E, α_E2, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E
+# Type-specific (3 each): ξ_C_k, ξ_E_k, ξ_CE_k (unconstrained for all three types)
 # Mixing: π_0_2, π_TYA_2 (type 2 logit intercept and TYA shifter, unconstrained)
 #         π_0_3, π_TYA_3 (type 3 logit intercept and TYA shifter, unconstrained)
 # Economic sign restrictions: α_C ≥ 0, α_E ≥ 0 (non-negative consumption utility),
+#                             α_E2 ≤ 0 (concave e-liquid consumption utility),
 #                             γ_1 ≤ 0 (withdrawal cost),
 #                             γ_2 ≤ 0 (orig ecig/bundle lock-in penalty),
 #                             γ_3 ≤ 0 (cig/orig bundle flavor lock-in penalty),
 #                             γ_4 ≤ 0 (flavored withdrawal cost on outside option),
 #                             ω_C ≤ 0, ω_E ≤ 0 (price disutility).
-#                             α_C  α_E  α_CE   λ_1    λ_2    λ_3    λ_4    γ_1   γ_2   γ_3   γ_4  ω_C   ω_E   ξ_C_1 ξ_E_1 ξ_CE_1 ξ_C_2 ξ_E_2 ξ_CE_2  ξ_C_3  ξ_E_3 ξ_CE_3 π_0_2 π_TYA_2 π_0_3 π_TYA_3
-θ_lower_bound = Float64[      0.0,  0.0, -Inf, -Inf,  -Inf,  -Inf,  -Inf,  -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf,  -Inf,  -Inf, -Inf,  -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf]
-θ_upper_bound = Float64[      Inf,  Inf,  Inf,  Inf,   Inf,   Inf,   Inf,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  Inf,  Inf,   Inf,   Inf,  Inf,   Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf]
+#                             α_C  α_E  α_E2  α_CE   λ_1    λ_2    λ_3    λ_4    γ_1   γ_2   γ_3   γ_4  ω_C   ω_E   ξ_C_1 ξ_E_1 ξ_CE_1 ξ_C_2 ξ_E_2 ξ_CE_2  ξ_C_3  ξ_E_3 ξ_CE_3 π_0_2 π_TYA_2 π_0_3 π_TYA_3
+θ_lower_bound = Float64[      0.0,  0.0, -Inf, -Inf, -Inf,  -Inf,  -Inf,  -Inf,  -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf,  -Inf,  -Inf, -Inf,  -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf, -Inf]
+θ_upper_bound = Float64[      Inf,  Inf,  0.0,  Inf,  Inf,   Inf,   Inf,   Inf,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  Inf,  Inf,   Inf,   Inf,  Inf,   Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf,  Inf]
 
-# Append ψ_3 bounds when estimating it
-if @isdefined(ESTIMATE_PSI_3) && ESTIMATE_PSI_3 && length(θ_lower_bound) == 26
+# Append ψ_3 bounds (the length check skips this if the file is included twice)
+if length(θ_lower_bound) == 27
     push!(θ_lower_bound, 0.01)   # ψ_3 > 0
     push!(θ_upper_bound, 0.99)   # ψ_3 < 1
 end
@@ -2463,15 +2427,15 @@ end
 """
 Check whether θ_vec satisfies the economic parameter bounds.
 
-Returns 
+Returns
 - Bool indicating whether there are violations or not
 - Vector of strings indicating the potential violations
 """
 function check_parameter_bounds(
-    θ_vec::AbstractVector{<:Real}, 
+    θ_vec::AbstractVector{<:Real},
     param_names_vec::AbstractVector{<:AbstractString}
 )
-    # Initialize vector of strings to store violation parameters 
+    # Initialize vector of strings to store violation parameters
     violated = String[]
 
     # Loop over indices of θ
@@ -2480,16 +2444,16 @@ function check_parameter_bounds(
         # Extract parameter name
         pname = param_names_vec[i]
 
-        # Check parameter violations 
+        # Check parameter violations
         if θ_vec[i] < θ_lower_bound[i]
 
-            # Store violation string in place 
+            # Store violation string in place
             push!(violated, "$pname=$(round(θ_vec[i], digits=4))<$(θ_lower_bound[i])")
 
-        # Check parameter violations 
+        # Check parameter violations
         elseif θ_vec[i] > θ_upper_bound[i]
 
-            # Store violation string in place 
+            # Store violation string in place
             push!(violated, "$pname=$(round(θ_vec[i], digits=4))>$(θ_upper_bound[i])")
         end
     end
@@ -2543,7 +2507,7 @@ function Optim.simplexer(
 
     # Remaining D vertices: shift x0 along each coordinate direction corresponding to S.add
     for d in 1:D
-        
+
         # Copy of original vertex (the actual parameter vector)
         vertex = copy(x0)
 
@@ -2551,7 +2515,7 @@ function Optim.simplexer(
         vertex[d] += S.add[d]
 
         # Simplex at index d + 1 is the perturbed vertex
-        # d + 1 b/c the simplex at position 1 is simply the actual parameter vector 
+        # d + 1 b/c position 1 holds the starting parameter vector
         simplex[d + 1] = vertex
     end
 
@@ -2604,7 +2568,7 @@ function random_amoeba(
     pnames = replace.(collect(String, string.(keys(starting_param))),
         "α" => "alpha", "λ" => "lambda", "γ" => "gamma",
         "ω" => "omega", "ξ" => "xi",
-        "ψ" => "psi", "β" => "beta")
+        "ψ" => "psi", "β" => "beta", "π" => "pi")
 
     # Initialize global best objective to a very large value
     overall_min = Inf
@@ -2669,8 +2633,8 @@ function random_amoeba(
         t_outer = time()
 
         # Reset simplex deviations to a copy of the base values at the start of each
-        # outer try. Using copy() prevents in-place mutations of this_add from
-        # accidentally corrupting the original add vector.
+        # outer try. copy() so that in-place changes to this_add do not
+        # change the original add vector.
         this_add = copy(add)
 
         # Print and log message indicating current outer try
@@ -2822,8 +2786,8 @@ function random_amoeba(
         #   l = 25 → ε = 0.32  (32% explore, 34% best, 34% current)
         #   l = 50 → ε = 0.26  (26% explore, 37% best, 37% current)
         #
-        # All three branches perturb by ±add to ensure every restart explores
-        # new territory (no restart ever uses the exact same parameter vector).
+        # All three branches perturb by ±add, so no restart starts from
+        # the same parameter vector as a previous one.
         ε_start = 0.75
         ε_end   = 0.25
         λ_decay = 0.077
@@ -2885,7 +2849,144 @@ function random_amoeba(
 end
 
 
-# Objective Function 
+"""
+Single long Nelder-Mead run from the starting parameters.
+
+There are no outer or inner tries: one simplex is built from the starting
+parameters and the simplex deviations, and Nelder-Mead runs until the
+objective converges or max_iter iterations are reached. Every trace_every
+iterations the current best NLL and parameters are appended to trace_file.
+
+Returns:
+- Optimal parameters as a NamedTuple matching the keys of starting_param
+- The minimum objective value
+"""
+function long_amoeba(
+    objective::Function,
+    starting_param::NamedTuple,
+    add::Vector{Float64};
+    max_iter::Integer = 1500,
+    f_abstol::Real = 1e-2,
+    trace_file::Union{AbstractString, Nothing} = nothing,
+    trace_every::Integer = 50
+)
+
+    # Starting values of the parameters
+    base_param = collect(Float64, values(starting_param))
+
+    # Number of parameters
+    N_params = length(base_param)
+
+    # Names of the parameters
+    pnames = replace.(collect(String, string.(keys(starting_param))),
+        "α" => "alpha", "λ" => "lambda", "γ" => "gamma",
+        "ω" => "omega", "ξ" => "xi",
+        "ψ" => "psi", "β" => "beta", "π" => "pi")
+
+    # A single run is a single optimizer phase, so the warm-started V is kept throughout
+    global ra_outer_try = 1
+    global ra_inner_run = 1
+
+    # Track the best point evaluated so far. Nelder-Mead never discards its best
+    # vertex, so this is the current best vertex of the simplex.
+    best_f = Inf
+    best_θ = copy(base_param)
+    function tracked_objective(θ)
+        f = objective(θ)
+        if f < best_f
+            best_f = f
+            best_θ = copy(θ)
+        end
+        return f
+    end
+
+    # Initialize file for writing the trace (if path provided): one row every
+    # trace_every iterations with the iteration, best NLL, and best parameters
+    trace_io = nothing
+    if trace_file !== nothing
+        trace_io = open(trace_file, "w")
+        println(trace_io, "iteration,NLL," * join(pnames, ","))
+        flush(trace_io)
+    end
+
+    # Callback invoked once per Nelder-Mead iteration; returning false keeps the optimizer going
+    function trace_callback(state)
+        if trace_io !== nothing && state.iteration % trace_every == 0
+            param_str = join([@sprintf("%.10f", x) for x in best_θ], ",")
+            println(trace_io, "$(state.iteration),$(@sprintf("%.10f", best_f)),$param_str")
+            flush(trace_io)
+        end
+        return false
+    end
+
+    # Print and log message indicating the optimization routine is starting
+    log_msg("")
+    log_msg("="^60)
+    log_msg("LONG AMOEBA OPTIMIZATION")
+    log_msg("="^60)
+    log_msg("")
+    log_msg("Starting Parameters:")
+    log_msg("")
+    for d in 1:N_params
+        log_msg(@sprintf("  %s = %.4f", pnames[d], base_param[d]))
+    end
+    log_msg("")
+
+    # Print and log simplex deviations
+    log_msg("Simplex Deviations:")
+    log_msg("")
+    for (i, dev) in enumerate(add)
+        log_msg(@sprintf("  %s = %.4f", pnames[i], dev))
+    end
+    log_msg("")
+    log_msg("Max iterations: $max_iter | f_abstol: $f_abstol | Trace every: $trace_every iterations")
+    log_msg("")
+
+    # Time the run
+    t_total = time()
+
+    # Run Nelder-Mead once from the starting parameters
+    result = optimize(
+        tracked_objective, base_param,
+        NelderMead(initial_simplex = SimplexWithAdd(add)),
+        Optim.Options(iterations = max_iter, f_abstol = f_abstol, callback = trace_callback)
+    )
+
+    # Close the trace file
+    if trace_io !== nothing
+        close(trace_io)
+    end
+
+    # Minimizer and minimum
+    minimizer = Optim.minimizer(result)
+    overall_min = Optim.minimum(result)
+
+    # Time the run
+    total_elapsed = time() - t_total
+
+    # Print and log results
+    log_msg("")
+    log_msg("="^60)
+    log_msg("LONG AMOEBA COMPLETE")
+    log_msg("="^60)
+    log_msg("Total time: $(round(total_elapsed, digits=1))s | " *
+            "Iterations: $(Optim.iterations(result))/$max_iter | " *
+            "Converged: $(Optim.converged(result))")
+    log_msg("Final objective: $(round(overall_min, digits=6))")
+    log_msg("Final parameters:")
+    for d in 1:N_params
+        log_msg("  $(pnames[d]) = $(round(minimizer[d], digits=8))")
+    end
+    log_msg("")
+
+    # Reconstruct named tuple with the same keys as starting_param
+    opt_param = (; zip(keys(starting_param), minimizer)...)
+
+    return opt_param, overall_min
+end
+
+
+# Objective Function
 
 """
 Objective function for the optimizer.
@@ -2951,34 +3052,21 @@ function objective(θ_vec::AbstractVector{<:Real})
     end
 
     # Extract K=3 mixture parameters
-    common    = θ_vec[1:13]      # α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E
-    type_1    = θ_vec[14:16]     # ξ_C_1, ξ_E_1, ξ_CE_1
-    type_2    = θ_vec[17:19]     # ξ_C_2, ξ_E_2, ξ_CE_2
-    type_3    = θ_vec[20:22]     # ξ_C_3, ξ_E_3, ξ_CE_3
-    π_0_2     = θ_vec[23]        # type 2 baseline logit intercept
-    π_TYA_2   = θ_vec[24]        # type 2 TYA share shifter
-    π_0_3     = θ_vec[25]        # type 3 baseline logit intercept
-    π_TYA_3   = θ_vec[26]        # type 3 TYA share shifter
+    common    = θ_vec[1:14]      # α_C, α_E, α_E2, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E
+    type_1    = θ_vec[15:17]     # ξ_C_1, ξ_E_1, ξ_CE_1
+    type_2    = θ_vec[18:20]     # ξ_C_2, ξ_E_2, ξ_CE_2
+    type_3    = θ_vec[21:23]     # ξ_C_3, ξ_E_3, ξ_CE_3
+    π_0_2     = θ_vec[24]        # type 2 baseline logit intercept
+    π_TYA_2   = θ_vec[25]        # type 2 TYA share shifter
+    π_0_3     = θ_vec[26]        # type 3 baseline logit intercept
+    π_TYA_3   = θ_vec[27]        # type 3 TYA share shifter
 
-    # Extract price coefficients for the P_obs correction in the likelihood
-    ω_C = Float64(common[12])
-    ω_E = Float64(common[13])
-
-    # When estimating ψ_3, extract it recompute flavored habit objects
-    if ESTIMATE_PSI_3
-        ψ_3_val = θ_vec[27]
-
-        # Recompute flavored habit transitions, initial stocks, and trajectories at candidate ψ_3
-        aflav_lower_eval, aflav_upper_eval, aflav_weight_eval = precompute_addiction_transitions(N_J, N_A_flav, ψ_3_val, A_flav, n_flav)
-        aflav0_eval, _ = get_initial_addiction_stock(ψ_3_val, A_flav, n_flav, y, hh_codes)
-        aflav_continuous_eval = simulate_addiction_trajectories(N_A_flav, ψ_3_val, A_flav, n_flav, y, hh_codes, aflav0_eval)
-    else
-        # Use pre-computed globals
-        aflav_lower_eval = aflav_lower_current
-        aflav_upper_eval = aflav_upper_current
-        aflav_weight_eval = aflav_weight_current
-        aflav_continuous_eval = aflav_continuous_current
-    end
+    # ψ_3 is the 28th parameter: recompute flavored habit transitions, initial stocks,
+    # and trajectories at the candidate value
+    ψ_3_val = θ_vec[28]
+    aflav_lower_eval, aflav_upper_eval, aflav_weight_eval = precompute_addiction_transitions(N_J, N_A_flav, ψ_3_val, A_flav, n_flav)
+    aflav0_eval, _ = get_initial_addiction_stock(ψ_3_val, A_flav, n_flav, y, hh_codes)
+    aflav_continuous_eval = simulate_addiction_trajectories(N_A_flav, ψ_3_val, A_flav, n_flav, y, hh_codes, aflav0_eval)
 
     # Construct per-type structural parameter vectors
     θ_struct_1 = vcat(common, type_1)
@@ -3114,7 +3202,6 @@ function objective(θ_vec::AbstractVector{<:Real})
         [V_decision_1, V_decision_2, V_decision_3], π_0_2, π_TYA_2, π_0_3, π_TYA_3, tya_share_hh,
         N_J, N_P, A_f, A_s, A_flav, P,
         y, tya_state, af_continuous_current, as_continuous_current, aflav_continuous_eval, p_continuous,
-        ω_C, ω_E, P_obs_cig, P_obs_ecig, q_cig, q_ecig,
         hh_ranges
     )
 

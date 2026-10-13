@@ -8,7 +8,7 @@
 # for 2021 onward and writes these panelist purchases data tables to a 
 # a file for each year. Upon running this script, I will have data
 # on household purchases for each year along with household information.
-# Further note, the arbitrary numbers
+# The arbitrary numbers
 # which I call "codes" can be found in the HMS manual.
 ################################################################################
 
@@ -38,7 +38,7 @@ options(max.print = 999999)
 # Increase the data table print limit
 options(datatable.print.nrows = 999)
 
-# Vector for years of data we are interested in 
+# Vector for years of data I am interested in
 years <- 2021:2023
 
 

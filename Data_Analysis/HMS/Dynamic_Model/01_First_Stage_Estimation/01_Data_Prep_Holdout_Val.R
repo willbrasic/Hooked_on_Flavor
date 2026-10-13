@@ -17,8 +17,8 @@
 # The 46-alternative structure (bins, consumption medians, nicotine medians)
 # must be identical to what was used during estimation. Bundle split thresholds
 # are therefore computed from the 2021-2022 data and applied to 2023 choices.
-# Consumption_Spaces, Nicotine_Spaces, Pricing_Spaces, Halton_Draw_Transitions,
-# and Halton_Draw_Shocks are copied from Data_Holdout/ unchanged.
+# Consumption_Spaces, Nicotine_Spaces, Pricing_Spaces, Price_Ratios, and
+# Halton_Draw_Transitions are copied from Data_Holdout/ unchanged.
 ################################################################################
 
 
@@ -87,13 +87,11 @@ rm(dt_full, list_hh_est, list_hh_val)
 #############################
 
 static_files <- c(
-  "Overlap_Household_Codes.csv",
   "Consumption_Spaces.csv",
   "Nicotine_Spaces.csv",
   "Pricing_Spaces.csv",
   "Halton_Draw_Transitions.csv",
-  "Halton_Draw_Shocks.csv",
-  "Median_Per-Unit_Monthly_Prices.csv"
+  "Price_Ratios.csv"
 )
 
 for (f in static_files)
@@ -161,7 +159,7 @@ dt_category_choices <- dt[, .(
 )]
 
 stopifnot("NA values found in category choice indicators" = !any(is.na(dt_category_choices)))
-all(rowSums(dt_category_choices) == 1)
+stopifnot("Each household-month must have exactly one category choice" = all(rowSums(dt_category_choices) == 1))
 
 file_name <- paste0(dir_holdout_val, "Category_Choices.csv")
 fwrite(dt_category_choices, file_name)
@@ -205,7 +203,8 @@ dt_product_choices <- dt[, .(
   orig_ecig_15to20  = fifelse(total_original_mL > 15 & total_original_mL <= 20 & total_packs == 0, 1, 0),
   orig_ecig_20to30  = fifelse(total_original_mL > 20 & total_original_mL <= 30 & total_packs == 0, 1, 0),
   orig_ecig_30to50  = fifelse(total_original_mL > 30 & total_original_mL <= 50 & total_packs == 0, 1, 0),
-  orig_ecig_50plus  = fifelse(total_original_mL > 50 & total_packs == 0, 1, 0),
+  orig_ecig_50to100 = fifelse(total_original_mL > 50 & total_original_mL <= 100 & total_packs == 0, 1, 0),
+  orig_ecig_100plus = fifelse(total_original_mL > 100 & total_packs == 0, 1, 0),
 
   # Non-FDA flavored e-cigarette alternatives (e-cig only: total_packs == 0)
   non_fda_flav_ecig_0to5    = fifelse(total_non_fda_flavored_mL > 0  & total_non_fda_flavored_mL <= 5  & total_packs == 0, 1, 0),
@@ -214,7 +213,8 @@ dt_product_choices <- dt[, .(
   non_fda_flav_ecig_15to20  = fifelse(total_non_fda_flavored_mL > 15 & total_non_fda_flavored_mL <= 20 & total_packs == 0, 1, 0),
   non_fda_flav_ecig_20to30  = fifelse(total_non_fda_flavored_mL > 20 & total_non_fda_flavored_mL <= 30 & total_packs == 0, 1, 0),
   non_fda_flav_ecig_30to50  = fifelse(total_non_fda_flavored_mL > 30 & total_non_fda_flavored_mL <= 50 & total_packs == 0, 1, 0),
-  non_fda_flav_ecig_50plus  = fifelse(total_non_fda_flavored_mL > 50 & total_packs == 0, 1, 0),
+  non_fda_flav_ecig_50to100 = fifelse(total_non_fda_flavored_mL > 50 & total_non_fda_flavored_mL <= 100 & total_packs == 0, 1, 0),
+  non_fda_flav_ecig_100plus = fifelse(total_non_fda_flavored_mL > 100 & total_packs == 0, 1, 0),
 
   # FDA-authorized flavored e-cigarette alternatives (e-cig only: total_packs == 0)
   fda_flav_ecig_0to5    = fifelse(total_fda_flavored_mL > 0  & total_fda_flavored_mL <= 5  & total_packs == 0, 1, 0),
@@ -223,7 +223,8 @@ dt_product_choices <- dt[, .(
   fda_flav_ecig_15to20  = fifelse(total_fda_flavored_mL > 15 & total_fda_flavored_mL <= 20 & total_packs == 0, 1, 0),
   fda_flav_ecig_20to30  = fifelse(total_fda_flavored_mL > 20 & total_fda_flavored_mL <= 30 & total_packs == 0, 1, 0),
   fda_flav_ecig_30to50  = fifelse(total_fda_flavored_mL > 30 & total_fda_flavored_mL <= 50 & total_packs == 0, 1, 0),
-  fda_flav_ecig_50plus  = fifelse(total_fda_flavored_mL > 50 & total_packs == 0, 1, 0),
+  fda_flav_ecig_50to100 = fifelse(total_fda_flavored_mL > 50 & total_fda_flavored_mL <= 100 & total_packs == 0, 1, 0),
+  fda_flav_ecig_100plus = fifelse(total_fda_flavored_mL > 100 & total_packs == 0, 1, 0),
 
   # Bundles: 4 per flavor type (lo/hi cig x lo/hi ecig at 2021-2022 thresholds)
   bundle_orig_ll = fifelse(total_packs > 0 & total_packs <= med_cig_packs & total_original_mL > 0  & total_original_mL <= med_orig_mL, 1, 0),
@@ -246,7 +247,7 @@ data.table(
 )[order(-fraction)]
 
 stopifnot("NA values found in product choice indicators" = !any(is.na(dt_product_choices)))
-all(rowSums(dt_product_choices) == 1)
+stopifnot("Each household-month must have exactly one product choice" = all(rowSums(dt_product_choices) == 1))
 
 file_name <- paste0(dir_holdout_val, "Product_Choices.csv")
 fwrite(dt_product_choices, file_name)
@@ -281,258 +282,122 @@ if (file.exists(file_name))
 
 #############################
 # Prices
+# (Market price x bin ratio)
 #############################
 
-# County-month median per-unit prices BY BIN
+# One market price per household-month and category: the county-month median
+# per-unit price pooled across quantity bins when the county has at least
+# `min_cell` purchases of that category in the month, otherwise the state-month
+# median, otherwise the national monthly median. A household's own transaction
+# price enters only through these medians, so the alternative it chose is priced
+# the same way as every alternative it did not choose. Bin-specific prices are
+# the market price times the national bin price ratio, which carries the
+# quantity discount. Estimation and simulation use this same construction.
+# Bin price ratios and representative consumption come from the training sample
+dt_price_ratios     <- fread(paste0(dir_holdout, "Price_Ratios.csv"))
+dt_consumption_long <- fread(paste0(dir_holdout, "Consumption_Spaces.csv"))
+
+min_cell <- 3
+
+# County-month market prices (pooled across bins) and the number of purchases behind them
 dt_county_month_prices <- dt[, .(
+  cig_cm    = median(real_per_pack_price_paid[total_packs > 0], na.rm = TRUE),
+  n_cig_cm  = sum(total_packs > 0),
+  ecig_cm   = median(real_per_mL_price_paid[total_mL > 0], na.rm = TRUE),
+  n_ecig_cm = sum(total_mL > 0)
+), keyby = .(fips_state_code, fips_county_code, purchase_month)]
 
-  cig_1_cm      = median(real_per_pack_price_paid[total_packs == 1 ], na.rm = TRUE),
-  cig_2_cm      = median(real_per_pack_price_paid[total_packs == 2 ], na.rm = TRUE),
-  cig_3to4_cm   = median(real_per_pack_price_paid[total_packs >= 3  & total_packs <= 4 ], na.rm = TRUE),
-  cig_5to9_cm   = median(real_per_pack_price_paid[total_packs >= 5  & total_packs <= 9 ], na.rm = TRUE),
-  cig_10_cm     = median(real_per_pack_price_paid[total_packs == 10], na.rm = TRUE),
-  cig_11to19_cm = median(real_per_pack_price_paid[total_packs >= 11 & total_packs <= 19], na.rm = TRUE),
-  cig_20_cm     = median(real_per_pack_price_paid[total_packs == 20], na.rm = TRUE),
-  cig_21to29_cm = median(real_per_pack_price_paid[total_packs >= 21 & total_packs <= 29], na.rm = TRUE),
-  cig_30_cm     = median(real_per_pack_price_paid[total_packs == 30], na.rm = TRUE),
-  cig_31to39_cm = median(real_per_pack_price_paid[total_packs >= 31 & total_packs <= 39], na.rm = TRUE),
-  cig_40_cm     = median(real_per_pack_price_paid[total_packs == 40], na.rm = TRUE),
-  cig_41plus_cm = median(real_per_pack_price_paid[total_packs >= 41], na.rm = TRUE),
-
-  ecig_0to5_cm   = median(real_per_mL_price_paid[total_mL > 0  & total_mL <= 5],  na.rm = TRUE),
-  ecig_5to10_cm  = median(real_per_mL_price_paid[total_mL > 5  & total_mL <= 10], na.rm = TRUE),
-  ecig_10to15_cm = median(real_per_mL_price_paid[total_mL > 10 & total_mL <= 15], na.rm = TRUE),
-  ecig_15to20_cm = median(real_per_mL_price_paid[total_mL > 15 & total_mL <= 20], na.rm = TRUE),
-  ecig_20to30_cm = median(real_per_mL_price_paid[total_mL > 20 & total_mL <= 30], na.rm = TRUE),
-  ecig_30to50_cm = median(real_per_mL_price_paid[total_mL > 30 & total_mL <= 50], na.rm = TRUE),
-  ecig_50plus_cm = median(real_per_mL_price_paid[total_mL > 50], na.rm = TRUE),
-
-  bundle_lo_cig_cm       = median(real_per_pack_price_paid[total_packs > 0  & total_packs <= med_cig_packs], na.rm = TRUE),
-  bundle_hi_cig_cm       = median(real_per_pack_price_paid[total_packs > med_cig_packs],                     na.rm = TRUE),
-  bundle_orig_lo_ecig_cm = median(real_per_mL_price_paid[total_original_mL > 0       & total_original_mL <= med_orig_mL & total_packs == 0], na.rm = TRUE),
-  bundle_orig_hi_ecig_cm = median(real_per_mL_price_paid[total_original_mL > med_orig_mL & total_packs == 0],                                na.rm = TRUE),
-  bundle_nfda_lo_ecig_cm = median(real_per_mL_price_paid[total_non_fda_flavored_mL > 0  & total_non_fda_flavored_mL <= med_nfda_mL & total_packs == 0], na.rm = TRUE),
-  bundle_nfda_hi_ecig_cm = median(real_per_mL_price_paid[total_non_fda_flavored_mL > med_nfda_mL & total_packs == 0],                                    na.rm = TRUE),
-  bundle_fda_lo_ecig_cm  = median(real_per_mL_price_paid[total_fda_flavored_mL > 0   & total_fda_flavored_mL <= med_fda_mL & total_packs == 0],          na.rm = TRUE),
-  bundle_fda_hi_ecig_cm  = median(real_per_mL_price_paid[total_fda_flavored_mL > med_fda_mL & total_packs == 0],                                         na.rm = TRUE)
-
-), keyby = .(fips_county_code, purchase_month)]
-
-# State-month median per-unit prices BY BIN
+# State-month market prices
 dt_state_month_prices <- dt[, .(
-
-  cig_1_sm      = median(real_per_pack_price_paid[total_packs == 1 ], na.rm = TRUE),
-  cig_2_sm      = median(real_per_pack_price_paid[total_packs == 2 ], na.rm = TRUE),
-  cig_3to4_sm   = median(real_per_pack_price_paid[total_packs >= 3  & total_packs <= 4 ], na.rm = TRUE),
-  cig_5to9_sm   = median(real_per_pack_price_paid[total_packs >= 5  & total_packs <= 9 ], na.rm = TRUE),
-  cig_10_sm     = median(real_per_pack_price_paid[total_packs == 10], na.rm = TRUE),
-  cig_11to19_sm = median(real_per_pack_price_paid[total_packs >= 11 & total_packs <= 19], na.rm = TRUE),
-  cig_20_sm     = median(real_per_pack_price_paid[total_packs == 20], na.rm = TRUE),
-  cig_21to29_sm = median(real_per_pack_price_paid[total_packs >= 21 & total_packs <= 29], na.rm = TRUE),
-  cig_30_sm     = median(real_per_pack_price_paid[total_packs == 30], na.rm = TRUE),
-  cig_31to39_sm = median(real_per_pack_price_paid[total_packs >= 31 & total_packs <= 39], na.rm = TRUE),
-  cig_40_sm     = median(real_per_pack_price_paid[total_packs == 40], na.rm = TRUE),
-  cig_41plus_sm = median(real_per_pack_price_paid[total_packs >= 41], na.rm = TRUE),
-
-  ecig_0to5_sm   = median(real_per_mL_price_paid[total_mL > 0  & total_mL <= 5],  na.rm = TRUE),
-  ecig_5to10_sm  = median(real_per_mL_price_paid[total_mL > 5  & total_mL <= 10], na.rm = TRUE),
-  ecig_10to15_sm = median(real_per_mL_price_paid[total_mL > 10 & total_mL <= 15], na.rm = TRUE),
-  ecig_15to20_sm = median(real_per_mL_price_paid[total_mL > 15 & total_mL <= 20], na.rm = TRUE),
-  ecig_20to30_sm = median(real_per_mL_price_paid[total_mL > 20 & total_mL <= 30], na.rm = TRUE),
-  ecig_30to50_sm = median(real_per_mL_price_paid[total_mL > 30 & total_mL <= 50], na.rm = TRUE),
-  ecig_50plus_sm = median(real_per_mL_price_paid[total_mL > 50], na.rm = TRUE),
-
-  bundle_lo_cig_sm       = median(real_per_pack_price_paid[total_packs > 0  & total_packs <= med_cig_packs], na.rm = TRUE),
-  bundle_hi_cig_sm       = median(real_per_pack_price_paid[total_packs > med_cig_packs],                     na.rm = TRUE),
-  bundle_orig_lo_ecig_sm = median(real_per_mL_price_paid[total_original_mL > 0       & total_original_mL <= med_orig_mL & total_packs == 0], na.rm = TRUE),
-  bundle_orig_hi_ecig_sm = median(real_per_mL_price_paid[total_original_mL > med_orig_mL & total_packs == 0],                                na.rm = TRUE),
-  bundle_nfda_lo_ecig_sm = median(real_per_mL_price_paid[total_non_fda_flavored_mL > 0  & total_non_fda_flavored_mL <= med_nfda_mL & total_packs == 0], na.rm = TRUE),
-  bundle_nfda_hi_ecig_sm = median(real_per_mL_price_paid[total_non_fda_flavored_mL > med_nfda_mL & total_packs == 0],                                    na.rm = TRUE),
-  bundle_fda_lo_ecig_sm  = median(real_per_mL_price_paid[total_fda_flavored_mL > 0   & total_fda_flavored_mL <= med_fda_mL & total_packs == 0],          na.rm = TRUE),
-  bundle_fda_hi_ecig_sm  = median(real_per_mL_price_paid[total_fda_flavored_mL > med_fda_mL & total_packs == 0],                                         na.rm = TRUE)
-
+  cig_sm  = median(real_per_pack_price_paid[total_packs > 0], na.rm = TRUE),
+  ecig_sm = median(real_per_mL_price_paid[total_mL > 0], na.rm = TRUE)
 ), keyby = .(fips_state_code, purchase_month)]
 
-# Monthly median per-unit prices BY BIN (fallback)
+# National monthly market prices (last fallback)
 dt_month_prices <- dt[, .(
-
-  cig_1_m      = median(real_per_pack_price_paid[total_packs == 1 ], na.rm = TRUE),
-  cig_2_m      = median(real_per_pack_price_paid[total_packs == 2 ], na.rm = TRUE),
-  cig_3to4_m   = median(real_per_pack_price_paid[total_packs >= 3  & total_packs <= 4 ], na.rm = TRUE),
-  cig_5to9_m   = median(real_per_pack_price_paid[total_packs >= 5  & total_packs <= 9 ], na.rm = TRUE),
-  cig_10_m     = median(real_per_pack_price_paid[total_packs == 10], na.rm = TRUE),
-  cig_11to19_m = median(real_per_pack_price_paid[total_packs >= 11 & total_packs <= 19], na.rm = TRUE),
-  cig_20_m     = median(real_per_pack_price_paid[total_packs == 20], na.rm = TRUE),
-  cig_21to29_m = median(real_per_pack_price_paid[total_packs >= 21 & total_packs <= 29], na.rm = TRUE),
-  cig_30_m     = median(real_per_pack_price_paid[total_packs == 30], na.rm = TRUE),
-  cig_31to39_m = median(real_per_pack_price_paid[total_packs >= 31 & total_packs <= 39], na.rm = TRUE),
-  cig_40_m     = median(real_per_pack_price_paid[total_packs == 40], na.rm = TRUE),
-  cig_41plus_m = median(real_per_pack_price_paid[total_packs >= 41], na.rm = TRUE),
-
-  ecig_0to5_m   = median(real_per_mL_price_paid[total_mL > 0  & total_mL <= 5],  na.rm = TRUE),
-  ecig_5to10_m  = median(real_per_mL_price_paid[total_mL > 5  & total_mL <= 10], na.rm = TRUE),
-  ecig_10to15_m = median(real_per_mL_price_paid[total_mL > 10 & total_mL <= 15], na.rm = TRUE),
-  ecig_15to20_m = median(real_per_mL_price_paid[total_mL > 15 & total_mL <= 20], na.rm = TRUE),
-  ecig_20to30_m = median(real_per_mL_price_paid[total_mL > 20 & total_mL <= 30], na.rm = TRUE),
-  ecig_30to50_m = median(real_per_mL_price_paid[total_mL > 30 & total_mL <= 50], na.rm = TRUE),
-  ecig_50plus_m = median(real_per_mL_price_paid[total_mL > 50], na.rm = TRUE),
-
-  bundle_lo_cig_m       = median(real_per_pack_price_paid[total_packs > 0  & total_packs <= med_cig_packs], na.rm = TRUE),
-  bundle_hi_cig_m       = median(real_per_pack_price_paid[total_packs > med_cig_packs],                     na.rm = TRUE),
-  bundle_orig_lo_ecig_m = median(real_per_mL_price_paid[total_original_mL > 0       & total_original_mL <= med_orig_mL & total_packs == 0], na.rm = TRUE),
-  bundle_orig_hi_ecig_m = median(real_per_mL_price_paid[total_original_mL > med_orig_mL & total_packs == 0],                                na.rm = TRUE),
-  bundle_nfda_lo_ecig_m = median(real_per_mL_price_paid[total_non_fda_flavored_mL > 0  & total_non_fda_flavored_mL <= med_nfda_mL & total_packs == 0], na.rm = TRUE),
-  bundle_nfda_hi_ecig_m = median(real_per_mL_price_paid[total_non_fda_flavored_mL > med_nfda_mL & total_packs == 0],                                    na.rm = TRUE),
-  bundle_fda_lo_ecig_m  = median(real_per_mL_price_paid[total_fda_flavored_mL > 0   & total_fda_flavored_mL <= med_fda_mL & total_packs == 0],          na.rm = TRUE),
-  bundle_fda_hi_ecig_m  = median(real_per_mL_price_paid[total_fda_flavored_mL > med_fda_mL & total_packs == 0],                                         na.rm = TRUE)
-
+  cig_m  = median(real_per_pack_price_paid[total_packs > 0], na.rm = TRUE),
+  ecig_m = median(real_per_mL_price_paid[total_mL > 0], na.rm = TRUE)
 ), keyby = purchase_month]
+stopifnot("Every month needs a national median price for both categories" = nrow(dt_month_prices[!complete.cases(dt_month_prices)]) == 0)
 
-nrow(dt_month_prices[!complete.cases(dt_month_prices)])
+# Link market prices to every household-month
+dt_prices <- dt[, .(household_code, purchase_month, fips_state_code, fips_county_code)]
+dt_prices[dt_county_month_prices, on = .(fips_state_code, fips_county_code, purchase_month),
+          `:=` (cig_cm = i.cig_cm, n_cig_cm = i.n_cig_cm, ecig_cm = i.ecig_cm, n_ecig_cm = i.n_ecig_cm)]
+dt_prices[dt_state_month_prices, on = .(fips_state_code, purchase_month),
+          `:=` (cig_sm = i.cig_sm, ecig_sm = i.ecig_sm)]
+dt_prices[dt_month_prices, on = .(purchase_month),
+          `:=` (cig_m = i.cig_m, ecig_m = i.ecig_m)]
 
-dt_prices <- dt[, .(household_code, purchase_month, fips_state_code, fips_county_code,
-                    total_packs, total_mL, total_flavored_mL, total_original_mL,
-                    real_per_pack_price_paid, real_per_mL_price_paid)]
-dt_prices[, names(dt_product_choices) := dt_product_choices]
+# Market price: county-month if the cell is large enough, else state-month, else national
+dt_prices[, market_cig  := fcoalesce(fifelse(!is.na(n_cig_cm)  & n_cig_cm  >= min_cell, cig_cm,  NA_real_), cig_sm,  cig_m)]
+dt_prices[, market_ecig := fcoalesce(fifelse(!is.na(n_ecig_cm) & n_ecig_cm >= min_cell, ecig_cm, NA_real_), ecig_sm, ecig_m)]
 
-# Merge county-month median prices
-cm_cols <- setdiff(names(dt_county_month_prices), c("fips_county_code", "purchase_month"))
-dt_prices[
-  dt_county_month_prices,
-  on = .(fips_county_code, purchase_month),
-  (cm_cols) := mget(paste0("i.", cm_cols))
-]
+# Share of household-months whose market price comes from each level
+cat("Market price source (share of household-months):\n")
+print(dt_prices[, .(
+  cig_county  = mean(!is.na(n_cig_cm) & n_cig_cm >= min_cell),
+  cig_state   = mean((is.na(n_cig_cm) | n_cig_cm < min_cell) & !is.na(cig_sm)),
+  cig_nation  = mean((is.na(n_cig_cm) | n_cig_cm < min_cell) & is.na(cig_sm)),
+  ecig_county = mean(!is.na(n_ecig_cm) & n_ecig_cm >= min_cell),
+  ecig_state  = mean((is.na(n_ecig_cm) | n_ecig_cm < min_cell) & !is.na(ecig_sm)),
+  ecig_nation = mean((is.na(n_ecig_cm) | n_ecig_cm < min_cell) & is.na(ecig_sm))
+)])
 
-# Merge state-month median prices
-sm_cols <- setdiff(names(dt_state_month_prices), c("fips_state_code", "purchase_month"))
-dt_prices[
-  dt_state_month_prices,
-  on = .(fips_state_code, purchase_month),
-  (sm_cols) := mget(paste0("i.", sm_cols))
-]
+# Bin price ratios (bin median / overall median) and representative consumption per alternative
+ratio_lookup <- setNames(dt_price_ratios[, ratio], dt_price_ratios[, alternative])
+cons_lookup  <- setNames(dt_consumption_long[, consumption], dt_consumption_long[, alternative])
+cig_bins  <- c("cig_1", "cig_2", "cig_3to4", "cig_5to9", "cig_10", "cig_11to19",
+               "cig_20", "cig_21to29", "cig_30", "cig_31to39", "cig_40", "cig_41plus")
+ecig_bins <- c("ecig_0to5", "ecig_5to10", "ecig_10to15", "ecig_15to20",
+               "ecig_20to30", "ecig_30to50", "ecig_50to100", "ecig_100plus")
+ecig_cons_bins <- paste0("orig_", ecig_bins)   # consumption of the pooled e-cig bins (same for all flavor types)
 
-# Merge monthly median prices
-m_cols <- setdiff(names(dt_month_prices), "purchase_month")
-dt_prices[
-  dt_month_prices,
-  on = .(purchase_month),
-  (m_cols) := mget(paste0("i.", m_cols))
-]
+# Standalone alternatives: market price x bin ratio
+for (b in cig_bins)
+{
+  dt_prices[, (paste0(b, "_p")) := market_cig * ratio_lookup[[b]]]
+}
+for (b in ecig_bins)
+{
+  dt_prices[, (paste0(b, "_p")) := market_ecig * ratio_lookup[[b]]]
+}
 
-# Tier 1: actual prices paid
-dt_prices[, cig_1_actual      := fifelse(cig_1 == 1,      real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_2_actual      := fifelse(cig_2 == 1,      real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_3to4_actual   := fifelse(cig_3to4 == 1,   real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_5to9_actual   := fifelse(cig_5to9 == 1,   real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_10_actual     := fifelse(cig_10 == 1,     real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_11to19_actual := fifelse(cig_11to19 == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_20_actual     := fifelse(cig_20 == 1,     real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_21to29_actual := fifelse(cig_21to29 == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_30_actual     := fifelse(cig_30 == 1,     real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_31to39_actual := fifelse(cig_31to39 == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_40_actual     := fifelse(cig_40 == 1,     real_per_pack_price_paid, NA_real_)]
-dt_prices[, cig_41plus_actual := fifelse(cig_41plus == 1, real_per_pack_price_paid, NA_real_)]
+# Bundle alternatives: each component takes the ratio of the standalone bin whose
+# representative consumption is closest to the bundle component's representative
+# consumption (the same mapping the Julia code uses for bundles)
+nearest_ratio <- function(value, cons_names, ratio_names)
+{
+  ratio_lookup[[ratio_names[which.min(abs(cons_lookup[cons_names] - value))]]]
+}
+bundles <- c("bundle_orig_ll", "bundle_orig_lh", "bundle_orig_hl", "bundle_orig_hh",
+             "bundle_nfda_ll", "bundle_nfda_lh", "bundle_nfda_hl", "bundle_nfda_hh",
+             "bundle_fda_ll",  "bundle_fda_lh",  "bundle_fda_hl",  "bundle_fda_hh")
+for (bn in bundles)
+{
+  r_cig  <- nearest_ratio(cons_lookup[[paste0(bn, "_cig")]],  cig_bins,       cig_bins)
+  r_ecig <- nearest_ratio(cons_lookup[[paste0(bn, "_ecig")]], ecig_cons_bins, ecig_bins)
+  dt_prices[, (paste0(bn, "_cig_p"))  := market_cig  * r_cig]
+  dt_prices[, (paste0(bn, "_ecig_p")) := market_ecig * r_ecig]
+}
 
-dt_prices[, ecig_0to5_actual   := fifelse(total_mL > 0  & total_mL <= 5,  real_per_mL_price_paid, NA_real_)]
-dt_prices[, ecig_5to10_actual  := fifelse(total_mL > 5  & total_mL <= 10, real_per_mL_price_paid, NA_real_)]
-dt_prices[, ecig_10to15_actual := fifelse(total_mL > 10 & total_mL <= 15, real_per_mL_price_paid, NA_real_)]
-dt_prices[, ecig_15to20_actual := fifelse(total_mL > 15 & total_mL <= 20, real_per_mL_price_paid, NA_real_)]
-dt_prices[, ecig_20to30_actual := fifelse(total_mL > 20 & total_mL <= 30, real_per_mL_price_paid, NA_real_)]
-dt_prices[, ecig_30to50_actual := fifelse(total_mL > 30 & total_mL <= 50, real_per_mL_price_paid, NA_real_)]
-dt_prices[, ecig_50plus_actual := fifelse(total_mL > 50,                  real_per_mL_price_paid, NA_real_)]
-
-dt_prices[, bundle_orig_ll_cig_actual  := fifelse(bundle_orig_ll == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_orig_ll_ecig_actual := fifelse(bundle_orig_ll == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_orig_lh_cig_actual  := fifelse(bundle_orig_lh == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_orig_lh_ecig_actual := fifelse(bundle_orig_lh == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_orig_hl_cig_actual  := fifelse(bundle_orig_hl == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_orig_hl_ecig_actual := fifelse(bundle_orig_hl == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_orig_hh_cig_actual  := fifelse(bundle_orig_hh == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_orig_hh_ecig_actual := fifelse(bundle_orig_hh == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_nfda_ll_cig_actual  := fifelse(bundle_nfda_ll == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_nfda_ll_ecig_actual := fifelse(bundle_nfda_ll == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_nfda_lh_cig_actual  := fifelse(bundle_nfda_lh == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_nfda_lh_ecig_actual := fifelse(bundle_nfda_lh == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_nfda_hl_cig_actual  := fifelse(bundle_nfda_hl == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_nfda_hl_ecig_actual := fifelse(bundle_nfda_hl == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_nfda_hh_cig_actual  := fifelse(bundle_nfda_hh == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_nfda_hh_ecig_actual := fifelse(bundle_nfda_hh == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_fda_ll_cig_actual   := fifelse(bundle_fda_ll  == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_fda_ll_ecig_actual  := fifelse(bundle_fda_ll  == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_fda_lh_cig_actual   := fifelse(bundle_fda_lh  == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_fda_lh_ecig_actual  := fifelse(bundle_fda_lh  == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_fda_hl_cig_actual   := fifelse(bundle_fda_hl  == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_fda_hl_ecig_actual  := fifelse(bundle_fda_hl  == 1, real_per_mL_price_paid,   NA_real_)]
-dt_prices[, bundle_fda_hh_cig_actual   := fifelse(bundle_fda_hh  == 1, real_per_pack_price_paid, NA_real_)]
-dt_prices[, bundle_fda_hh_ecig_actual  := fifelse(bundle_fda_hh  == 1, real_per_mL_price_paid,   NA_real_)]
-
-# Final prices: fcoalesce(actual, county-month, state-month, monthly)
-dt_prices[, cig_1_p      := fcoalesce(cig_1_actual, cig_1_cm, cig_1_sm, cig_1_m)]
-dt_prices[, cig_2_p      := fcoalesce(cig_2_actual, cig_2_cm, cig_2_sm, cig_2_m)]
-dt_prices[, cig_3to4_p   := fcoalesce(cig_3to4_actual, cig_3to4_cm, cig_3to4_sm, cig_3to4_m)]
-dt_prices[, cig_5to9_p   := fcoalesce(cig_5to9_actual, cig_5to9_cm, cig_5to9_sm, cig_5to9_m)]
-dt_prices[, cig_10_p     := fcoalesce(cig_10_actual, cig_10_cm, cig_10_sm, cig_10_m)]
-dt_prices[, cig_11to19_p := fcoalesce(cig_11to19_actual, cig_11to19_cm, cig_11to19_sm, cig_11to19_m)]
-dt_prices[, cig_20_p     := fcoalesce(cig_20_actual, cig_20_cm, cig_20_sm, cig_20_m)]
-dt_prices[, cig_21to29_p := fcoalesce(cig_21to29_actual, cig_21to29_cm, cig_21to29_sm, cig_21to29_m)]
-dt_prices[, cig_30_p     := fcoalesce(cig_30_actual, cig_30_cm, cig_30_sm, cig_30_m)]
-dt_prices[, cig_31to39_p := fcoalesce(cig_31to39_actual, cig_31to39_cm, cig_31to39_sm, cig_31to39_m)]
-dt_prices[, cig_40_p     := fcoalesce(cig_40_actual, cig_40_cm, cig_40_sm, cig_40_m)]
-dt_prices[, cig_41plus_p := fcoalesce(cig_41plus_actual, cig_41plus_cm, cig_41plus_sm, cig_41plus_m)]
-
-dt_prices[, ecig_0to5_p   := fcoalesce(ecig_0to5_actual, ecig_0to5_cm, ecig_0to5_sm, ecig_0to5_m)]
-dt_prices[, ecig_5to10_p  := fcoalesce(ecig_5to10_actual, ecig_5to10_cm, ecig_5to10_sm, ecig_5to10_m)]
-dt_prices[, ecig_10to15_p := fcoalesce(ecig_10to15_actual, ecig_10to15_cm, ecig_10to15_sm, ecig_10to15_m)]
-dt_prices[, ecig_15to20_p := fcoalesce(ecig_15to20_actual, ecig_15to20_cm, ecig_15to20_sm, ecig_15to20_m)]
-dt_prices[, ecig_20to30_p := fcoalesce(ecig_20to30_actual, ecig_20to30_cm, ecig_20to30_sm, ecig_20to30_m)]
-dt_prices[, ecig_30to50_p := fcoalesce(ecig_30to50_actual, ecig_30to50_cm, ecig_30to50_sm, ecig_30to50_m)]
-dt_prices[, ecig_50plus_p := fcoalesce(ecig_50plus_actual, ecig_50plus_cm, ecig_50plus_sm, ecig_50plus_m)]
-
-dt_prices[, bundle_orig_ll_cig_p  := fcoalesce(bundle_orig_ll_cig_actual,  bundle_lo_cig_cm, bundle_lo_cig_sm, bundle_lo_cig_m)]
-dt_prices[, bundle_orig_ll_ecig_p := fcoalesce(bundle_orig_ll_ecig_actual, bundle_orig_lo_ecig_cm, bundle_orig_lo_ecig_sm, bundle_orig_lo_ecig_m)]
-dt_prices[, bundle_orig_lh_cig_p  := fcoalesce(bundle_orig_lh_cig_actual,  bundle_lo_cig_cm, bundle_lo_cig_sm, bundle_lo_cig_m)]
-dt_prices[, bundle_orig_lh_ecig_p := fcoalesce(bundle_orig_lh_ecig_actual, bundle_orig_hi_ecig_cm, bundle_orig_hi_ecig_sm, bundle_orig_hi_ecig_m)]
-dt_prices[, bundle_orig_hl_cig_p  := fcoalesce(bundle_orig_hl_cig_actual,  bundle_hi_cig_cm, bundle_hi_cig_sm, bundle_hi_cig_m)]
-dt_prices[, bundle_orig_hl_ecig_p := fcoalesce(bundle_orig_hl_ecig_actual, bundle_orig_lo_ecig_cm, bundle_orig_lo_ecig_sm, bundle_orig_lo_ecig_m)]
-dt_prices[, bundle_orig_hh_cig_p  := fcoalesce(bundle_orig_hh_cig_actual,  bundle_hi_cig_cm, bundle_hi_cig_sm, bundle_hi_cig_m)]
-dt_prices[, bundle_orig_hh_ecig_p := fcoalesce(bundle_orig_hh_ecig_actual, bundle_orig_hi_ecig_cm, bundle_orig_hi_ecig_sm, bundle_orig_hi_ecig_m)]
-dt_prices[, bundle_nfda_ll_cig_p  := fcoalesce(bundle_nfda_ll_cig_actual,  bundle_lo_cig_cm, bundle_lo_cig_sm, bundle_lo_cig_m)]
-dt_prices[, bundle_nfda_ll_ecig_p := fcoalesce(bundle_nfda_ll_ecig_actual, bundle_nfda_lo_ecig_cm, bundle_nfda_lo_ecig_sm, bundle_nfda_lo_ecig_m)]
-dt_prices[, bundle_nfda_lh_cig_p  := fcoalesce(bundle_nfda_lh_cig_actual,  bundle_lo_cig_cm, bundle_lo_cig_sm, bundle_lo_cig_m)]
-dt_prices[, bundle_nfda_lh_ecig_p := fcoalesce(bundle_nfda_lh_ecig_actual, bundle_nfda_hi_ecig_cm, bundle_nfda_hi_ecig_sm, bundle_nfda_hi_ecig_m)]
-dt_prices[, bundle_nfda_hl_cig_p  := fcoalesce(bundle_nfda_hl_cig_actual,  bundle_hi_cig_cm, bundle_hi_cig_sm, bundle_hi_cig_m)]
-dt_prices[, bundle_nfda_hl_ecig_p := fcoalesce(bundle_nfda_hl_ecig_actual, bundle_nfda_lo_ecig_cm, bundle_nfda_lo_ecig_sm, bundle_nfda_lo_ecig_m)]
-dt_prices[, bundle_nfda_hh_cig_p  := fcoalesce(bundle_nfda_hh_cig_actual,  bundle_hi_cig_cm, bundle_hi_cig_sm, bundle_hi_cig_m)]
-dt_prices[, bundle_nfda_hh_ecig_p := fcoalesce(bundle_nfda_hh_ecig_actual, bundle_nfda_hi_ecig_cm, bundle_nfda_hi_ecig_sm, bundle_nfda_hi_ecig_m)]
-dt_prices[, bundle_fda_ll_cig_p   := fcoalesce(bundle_fda_ll_cig_actual,   bundle_lo_cig_cm, bundle_lo_cig_sm, bundle_lo_cig_m)]
-dt_prices[, bundle_fda_ll_ecig_p  := fcoalesce(bundle_fda_ll_ecig_actual,  bundle_fda_lo_ecig_cm, bundle_fda_lo_ecig_sm, bundle_fda_lo_ecig_m)]
-dt_prices[, bundle_fda_lh_cig_p   := fcoalesce(bundle_fda_lh_cig_actual,   bundle_lo_cig_cm, bundle_lo_cig_sm, bundle_lo_cig_m)]
-dt_prices[, bundle_fda_lh_ecig_p  := fcoalesce(bundle_fda_lh_ecig_actual,  bundle_fda_hi_ecig_cm, bundle_fda_hi_ecig_sm, bundle_fda_hi_ecig_m)]
-dt_prices[, bundle_fda_hl_cig_p   := fcoalesce(bundle_fda_hl_cig_actual,   bundle_hi_cig_cm, bundle_hi_cig_sm, bundle_hi_cig_m)]
-dt_prices[, bundle_fda_hl_ecig_p  := fcoalesce(bundle_fda_hl_ecig_actual,  bundle_fda_lo_ecig_cm, bundle_fda_lo_ecig_sm, bundle_fda_lo_ecig_m)]
-dt_prices[, bundle_fda_hh_cig_p   := fcoalesce(bundle_fda_hh_cig_actual,   bundle_hi_cig_cm, bundle_hi_cig_sm, bundle_hi_cig_m)]
-dt_prices[, bundle_fda_hh_ecig_p  := fcoalesce(bundle_fda_hh_ecig_actual,  bundle_fda_hi_ecig_cm, bundle_fda_hi_ecig_sm, bundle_fda_hi_ecig_m)]
-
+# Columns written: the 45 alternative prices (names unchanged for the Julia reader)
+# plus the two market prices they are built from
 price_cols <- c(
-  "cig_1_p", "cig_2_p", "cig_3to4_p", "cig_5to9_p", "cig_10_p", "cig_11to19_p",
-  "cig_20_p", "cig_21to29_p", "cig_30_p", "cig_31to39_p", "cig_40_p", "cig_41plus_p",
-  "ecig_0to5_p", "ecig_5to10_p", "ecig_10to15_p", "ecig_15to20_p",
-  "ecig_20to30_p", "ecig_30to50_p", "ecig_50plus_p",
-  "bundle_orig_ll_cig_p", "bundle_orig_lh_cig_p", "bundle_orig_hl_cig_p", "bundle_orig_hh_cig_p",
-  "bundle_nfda_ll_cig_p", "bundle_nfda_lh_cig_p", "bundle_nfda_hl_cig_p", "bundle_nfda_hh_cig_p",
-  "bundle_fda_ll_cig_p",  "bundle_fda_lh_cig_p",  "bundle_fda_hl_cig_p",  "bundle_fda_hh_cig_p",
-  "bundle_orig_ll_ecig_p", "bundle_orig_lh_ecig_p", "bundle_orig_hl_ecig_p", "bundle_orig_hh_ecig_p",
-  "bundle_nfda_ll_ecig_p", "bundle_nfda_lh_ecig_p", "bundle_nfda_hl_ecig_p", "bundle_nfda_hh_ecig_p",
-  "bundle_fda_ll_ecig_p",  "bundle_fda_lh_ecig_p",  "bundle_fda_hl_ecig_p",  "bundle_fda_hh_ecig_p"
+  paste0(cig_bins, "_p"),
+  paste0(ecig_bins, "_p"),
+  paste0(bundles, "_cig_p"),
+  paste0(bundles, "_ecig_p"),
+  "market_cig", "market_ecig"
 )
-
-dt_prices[, sum(sapply(.SD, function(x) sum(is.na(x)))), .SDcols = price_cols]
-
+stopifnot("Price matrix contains NA" = dt_prices[, sum(sapply(.SD, function(x) sum(is.na(x)))), .SDcols = price_cols] == 0)
 dt_prices <- dt_prices[, ..price_cols]
 
+# Write the data to a file
 file_name <- paste0(dir_holdout_val, "Prices.csv")
 fwrite(dt_prices, file_name)
 
+# Confirm results have been written to a file
 if (file.exists(file_name))
 {
   cat("Results have been written to\n", file_name, "\n")
@@ -540,18 +405,11 @@ if (file.exists(file_name))
 {
   cat("Error: File could not be written\n")
 }
-
-cat("\nData_Holdout_Val/ preparation complete.\n")
-cat("Validation data: overlap households x 2023\n")
-cat("Next step: update 02_Validation_Mixture.jl to load 2023 data from Data_Holdout_Val/\n")
-cat("           and use terminal 2022 addiction stocks as 2023 starting states.\n")
-
-
 #############################
 # Household Coverage Check
 #############################
 
-# Verify that every 2023 overlap household appears in the 2021-2022 estimation
+# Check that every 2023 overlap household appears in the 2021-2022 estimation
 # sample. 
 hh_est_codes <- fread(paste0(dir_holdout, "Household_Codes.csv"))[, unique(household_code)]
 hh_val_codes <- fread(paste0(dir_holdout_val, "Household_Codes.csv"))[, unique(household_code)]

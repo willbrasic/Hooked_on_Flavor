@@ -13,7 +13,7 @@
 # Output
 # --------------------------------------------------------------
 
-### Slurm stdout/stderr — captures Julia startup errors, module load failures, etc.
+### Slurm stdout/stderr: catches Julia startup errors, module load failures, etc.
 #SBATCH --output=slurm_%j.out
 #SBATCH --error=slurm_%j.err
 
@@ -23,7 +23,7 @@
 # --------------------------------------------------------------
 
 ### REQUIRED. Specify the PI group for this job
-#SBATCH --account=wildenbeest
+#SBATCH --account=fishback
 
 ### Optional. Request email when job begins and ends
 ### SBATCH --mail-type=BEGIN,END,FAIL
@@ -57,28 +57,14 @@
 # Estimation Flags
 # --------------------------------------------------------------
 
-# Forward fixed parameter overrides to Julia.
-# Set at submission time (defaults apply if not provided).
+# Discount factor β, forwarded to Julia (default 1.0).
 #
-# Flags:
-#   ESTIMATE_PSI_3 (default: false)  Estimate ψ_3 jointly (adds it to the parameter vector)
-#   PSI_3          (default: 0.75)   Fixed ψ_3 value (ignored when ESTIMATE_PSI_3=true)
-#   BETA           (default: 1.0)    Discount factor β
-#
-# Usage examples:
-#   Base model (ψ_3=0.75 fixed, β=1.0):
+# Usage:
+#   Base model (β = 1.0):
 #     sbatch 02_Estimation_Mixture_Slurm.sb
 #
-#   Grid search over fixed ψ_3:
-#     PSI_3=0.50 sbatch 02_Estimation_Mixture_Slurm.sb
-#
-#   Estimate ψ_3 jointly (starting from 0.75):
-#     ESTIMATE_PSI_3=true sbatch 02_Estimation_Mixture_Slurm.sb
-#
-#   Alternative β (e.g. present bias):
-#     BETA=0.90 sbatch 02_Estimation_Mixture_Slurm.sb
-export PSI_3=${PSI_3:-0.75}
-export ESTIMATE_PSI_3=${ESTIMATE_PSI_3:-false}
+#   Present bias (β = 0.70):
+#     BETA=0.70 sbatch 02_Estimation_Mixture_Slurm.sb
 export BETA=${BETA:-1.0}
 
 
@@ -93,7 +79,7 @@ module load julia
 export JULIA_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 # Navigate to the script directory
-cd /home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/02_Second_Stage_Estimation_V2_Holdout
+cd /home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/02_Second_Stage_Estimation_Mixture_Holdout
 
 # Run script
 julia 02_Estimation_Mixture.jl

@@ -68,7 +68,7 @@ states <- c(
 
 
 #############################
-# Helper function:
+# Function:
 # compute transition matrix
 #############################
 
@@ -95,6 +95,18 @@ compute_transition_matrix <- function(dt_input, states, id_col, time_col)
                                       original_ecig == 0 & flavored_ecig == 1, 1, 0)
   )]
 
+  # Tabulate transitions between the mutually exclusive states
+  P <- tabulate_transition_matrix(dt_work, states, id_col, time_col)
+
+  return(P)
+}
+
+# Returns a row-stochastic transition probability matrix from a data table that
+# already contains one indicator column per state. Keeps observations belonging
+# to exactly one state, computes the lagged state within each household, and
+# tabulates transitions.
+tabulate_transition_matrix <- function(dt_work, states, id_col, time_col)
+{
   # Keep only panel identifiers and state columns
   cols <- c(id_col, time_col, states)
   dt_work <- dt_work[, ..cols]
@@ -166,3 +178,97 @@ dt_tya <- dt_tya[!(original_ecig == 1 & flavored_ecig == 1)]
 # Compute transition matrix
 P_young <- compute_transition_matrix(dt_tya, states, id_col, time_col)
 P_young
+
+# TYA-absent households (Panel (A) of the main-text table; the all-household
+# matrix P above is reported in the appendix)
+dt_absent <- dt[teen_or_young_adult_present == 0]
+P_absent <- compute_transition_matrix(dt_absent, states, id_col, time_col)
+P_absent
+
+
+#############################
+# Define mutually exclusive
+# FDA authorization states
+#############################
+
+# Six mutually exclusive states splitting e-cig purchases by FDA authorization
+# rather than by flavor:
+#   1. outside_option:           no tobacco purchased
+#   2. cig:                      cigarettes only
+#   3. authorized_ecig:          FDA-authorized e-cig only
+#   4. unauthorized_ecig:        unauthorized e-cig only
+#   5. cig_and_authorized_ecig:  cigarettes + FDA-authorized e-cig bundle
+#   6. cig_and_unauthorized_ecig: cigarettes + unauthorized e-cig bundle
+# Months with both authorized and unauthorized e-cig purchases are dropped,
+# mirroring the treatment of mixed original/flavored months above.
+
+states_fda <- c(
+  "outside_option",
+  "cig",
+  "authorized_ecig",
+  "unauthorized_ecig",
+  "cig_and_authorized_ecig",
+  "cig_and_unauthorized_ecig"
+)
+
+
+#############################
+# Function:
+# compute FDA authorization
+# transition matrix
+#############################
+
+# Same construction as compute_transition_matrix, with e-cig states defined by
+# whether the month's e-liquid came from FDA-authorized or unauthorized products
+compute_fda_transition_matrix <- function(dt_input, states, id_col, time_col)
+{
+  # Copy to avoid modifying the input
+  dt_work <- copy(dt_input)
+
+  # Unauthorized mL is total mL net of FDA-authorized mL
+  dt_work[, unauthorized_mL := total_mL - total_fda_authorized_mL]
+  dt_work[is.na(unauthorized_mL), unauthorized_mL := 0]
+  dt_work[is.na(total_fda_authorized_mL), total_fda_authorized_mL := 0]
+
+  # Create mutually exclusive state indicators
+  dt_work[, `:=` (
+    outside_option            = fifelse(cig == 0 & ecig == 0 & cig_ecig == 0, 1, 0),
+    cig                       = fifelse(cig == 1 & ecig == 0 & cig_ecig == 0, 1, 0),
+    authorized_ecig           = fifelse(cig == 0 & ecig == 1 & cig_ecig == 0 &
+                                          total_fda_authorized_mL > 0 & unauthorized_mL == 0, 1, 0),
+    unauthorized_ecig         = fifelse(cig == 0 & ecig == 1 & cig_ecig == 0 &
+                                          total_fda_authorized_mL == 0 & unauthorized_mL > 0, 1, 0),
+    cig_and_authorized_ecig   = fifelse(cig == 0 & ecig == 0 & cig_ecig == 1 &
+                                          total_fda_authorized_mL > 0 & unauthorized_mL == 0, 1, 0),
+    cig_and_unauthorized_ecig = fifelse(cig == 0 & ecig == 0 & cig_ecig == 1 &
+                                          total_fda_authorized_mL == 0 & unauthorized_mL > 0, 1, 0)
+  )]
+
+  # Tabulate transitions between the mutually exclusive states
+  P <- tabulate_transition_matrix(dt_work, states, id_col, time_col)
+
+  return(P)
+}
+
+
+#############################
+# FDA authorization
+# transition matrix:
+# all households
+#############################
+
+# Compute transition matrix
+P_fda <- compute_fda_transition_matrix(dt, states_fda, id_col, time_col)
+P_fda
+
+
+#############################
+# FDA authorization
+# transition matrix:
+# households with teen
+# or young adult present
+#############################
+
+# Compute transition matrix
+P_fda_young <- compute_fda_transition_matrix(dt_tya, states_fda, id_col, time_col)
+P_fda_young

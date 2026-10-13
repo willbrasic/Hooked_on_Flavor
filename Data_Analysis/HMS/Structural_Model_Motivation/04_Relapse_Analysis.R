@@ -46,7 +46,7 @@ dt <- fread(paste0("./tobacco_panelists_purchases_monthly_CLEANED_2021-Onward.cs
 
 
 #############################
-# Helper function:
+# Function:
 # compute relapse episodes
 #############################
 
@@ -183,4 +183,27 @@ dt_cdf[, cdf_ecig := sapply(months_to_relapse, function(h) sum(dt_cdf_ecig$month
 # Save to the figures directory for pgfplots
 fig_dir <- file.path("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper",
                      "4th_Year_Paper/4th_Year_Paper_Figures")
-fwrite(dt_cdf, file.path(fig_dir, "08_Relapse_CDF.txt"))
+fwrite(dt_cdf, file.path(fig_dir, "05_Relapse_CDF.txt"))
+
+
+#############################
+# Relapse CDF by TYA status
+#############################
+
+# Same construction as above, with spells classified by whether a teen or
+# young adult was present in the household in the month the spell began
+max_months_tya <- 24
+dt_cdf_tya <- data.table(months_to_relapse = 0:max_months_tya)
+for (col in c("any_cig", "any_ecig"))
+{
+  for (g in 0:1)
+  {
+    list_g <- compute_relapse_episodes(dt_relapse[teen_or_young_adult_present == g], col)
+    dt_ep_g <- list_g$episodes
+    dt_rel_g <- dt_ep_g[relapsed == 1]
+    col_name <- sprintf("cdf_%s_tya%d", sub("any_", "", col), g)
+    dt_cdf_tya[, (col_name) := sapply(months_to_relapse,
+                                      function(h) sum(dt_rel_g$months_to_relapse <= h) / nrow(dt_ep_g))]
+  }
+}
+fwrite(dt_cdf_tya, file.path(fig_dir, "05_Relapse_CDF_TYA.txt"))

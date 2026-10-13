@@ -13,12 +13,19 @@
 # Observed prices and TYA states are used at each period. Only the addiction
 # stocks are simulated forward.
 #
-# Validation exercises:
-#   1. Price elasticities: long-run (VFI re-solved under shocked prices)
-#      for cigarettes and e-cigarettes, own- and cross-price
-#   2. Streak persistence curves for cig and ecig, separately by TYA status
-#   3. Post-purchase destination paths after a flavored e-cig purchase
-#   4. Post-purchase destination paths after a cigarette purchase
+# This holdout version is a stricter test than the in-sample one. The
+# households here were withheld from estimation, so the model could not
+# have fit their purchase histories. Matching their streak persistence
+# and quantity escalation curves is therefore an out-of-sample test, not
+# a check of fit on the training data.
+#
+# Validation exercises (price elasticities are computed in 04_Validation_Mixture):
+#   1. Streak persistence (category persistence): probability of continuing
+#      a purchase streak for cig and ecig, for all households, TYA-present
+#      households, and modal latent type 1 and type 2 households
+#   2. Quantity escalation (quantity persistence): mean and median packs or
+#      mL purchased by streak length, in original units, for the same four
+#      groups, plus the purchase tallies by quantity bin
 ################################################################################
 
 
@@ -29,18 +36,18 @@
 # Present-bias β (read from ENV to match estimation run; never estimated)
 BETA = parse(Float64, get(ENV, "BETA", "1.0"))
 
-# Whether ψ_3 was estimated jointly as the 27th parameter (must match the estimation run)
-ESTIMATE_PSI_3 = parse(Bool, get(ENV, "ESTIMATE_PSI_3", "false"))
+# Whether ψ_3 was estimated jointly as the 28th parameter (must match the estimation run)
+ESTIMATE_PSI_3 = true   # ψ_3 is always estimated jointly as parameter 28
 
-# Fixed flavored habit decay rate (ignored when ESTIMATE_PSI_3=true; θ_hat[27] is used instead)
-PSI_3 = parse(Float64, get(ENV, "PSI_3", "0.75"))
+# Fixed flavored habit decay rate (grid seed; θ_hat[28] is the estimate)
+PSI_3 = parse(Float64, get(ENV, "PSI_3", "0.50"))
 
 # Fixed parameters (ψ_1, ψ_2 always fixed; β fixed per run but can vary across runs)
 ψ_1 = 0.10
 ψ_2 = 0.90
 β   = BETA
 
-# VFI convergence tolerance 
+# VFI convergence tolerance
 VFI_TOL = 1e-6
 
 # Number of simulation draws
@@ -51,9 +58,9 @@ HPC = !Sys.iswindows()
 
 # Load all functions and packages from the estimation functions file
 if HPC
-    include("../02_Second_Stage_Estimation_V2/01_Functions_Mixture.jl")
+    include("../02_Second_Stage_Estimation_Mixture_Holdout/01_Functions_Mixture.jl")
 else
-    include("../02_Second_Stage_Estimation_Mixture/01_Functions_Mixture.jl")
+    include("../02_Second_Stage_Estimation_Mixture_Holdout/01_Functions_Mixture.jl")
 end
 
 # Additional imports for simulation
@@ -67,25 +74,30 @@ include("01_Validation_Functions_Mixture.jl")
 # These must exactly match the tags used by 02_Estimation_Mixture.jl to locate estimates.
 psi_tag   = "Psi2_09_Psi1_01"
 beta_tag  = "Beta_$(numeric_tag(BETA))"
-psi_3_tag = ESTIMATE_PSI_3 ? "Psi3_Est" : "Psi3_$(numeric_tag(PSI_3))"
 
 # File paths if on HPC or not
 if HPC
 
     # Output path for results (use absolute path so it's unaffected by later cd)
-    output_dir = abspath("./Validation_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results")
+    output_dir = abspath("./Validation_Mixture_Holdout_$(psi_tag)_$(beta_tag)_Results")
     mkpath(output_dir)
 
     # Set working directory to where the data CSVs live
-    cd("/home/u2/wbrasic/4th_Year_Paper/Data")
+    cd("/home/u2/wbrasic/4th_Year_Paper/Data_Holdout")
+
+    # 2023 holdout validation data directory (loaded after posteriors are computed)
+    dir_val = "/home/u2/wbrasic/4th_Year_Paper/Data_Holdout_Val"
 else
 
     # Output path for results (local Windows path)
-    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Validation_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results"
+    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Validation_Mixture_Holdout_$(psi_tag)_$(beta_tag)_Results"
     mkpath(output_dir)
 
     # Set working directory to where the data CSVs live
-    cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Data")
+    cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Data_Holdout")
+
+    # 2023 holdout validation data directory (loaded after posteriors are computed)
+    dir_val = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Data_Holdout_Val"
 end
 
 # Set log file path
@@ -95,15 +107,14 @@ log_path = joinpath(output_dir, "Validation_Mixture_Log.txt")
 log_io = open(log_path, "w")
 
 # Print and log the start time and number of Julia threads available for VFI parallelization
-log_msg("Simulation-based K=3 mixture model validation ($(psi_tag)_$(beta_tag)_$(psi_3_tag)) started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+log_msg("Simulation-based K=3 mixture model validation ($(psi_tag)_$(beta_tag)) started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
 log_msg("")
 log_msg("Number of threads: $(Threads.nthreads())")
 log_msg("Number of simulation draws: $S")
-log_msg("ESTIMATE_PSI_3 = $ESTIMATE_PSI_3")
-log_msg("PSI_3          = $PSI_3" * (ESTIMATE_PSI_3 ? " (will be overridden by estimate)" : " (fixed)"))
+log_msg("PSI_3          = $PSI_3 (grid seed; overridden by the estimate θ_hat[28])")
 log_msg("")
 
-# Get household identifiers 
+# Get household identifiers
 hh_codes = get_hh_codes();
 
 # Pre-compute contiguous household index ranges for mixture log-likelihood
@@ -117,7 +128,7 @@ hh_ranges = precompute_hh_ranges(hh_codes);
 
 # Load fixed parameters: only δ (the per-period discount factor) is extracted
 # here. get_fixed_parameters() returns (ψ_1, ψ_2, β, δ), but ψ_1, ψ_2, and β
-# are already set from the hardcoded block above and from the ENV-read BETA,
+# are already set in the fixed-parameter block above and from the ENV-read BETA,
 # so I discard the first three return values with underscore placeholders.
 _, _, _, δ = get_fixed_parameters();
 
@@ -214,8 +225,7 @@ p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_t
 
 # Map observed household prices to continuous values for likelihood interpolation
 # p_continuous is N × 2 (cig price, ecig price) - actual per-unit prices, not grid indices
-# P_obs_cig / P_obs_ecig (N × N_J bin-specific prices) are not used in simulation
-_, p_continuous, _, _ = map_prices_to_grid(N_P, P, Pcomb, N_J);
+_, p_continuous = map_prices_to_grid(N_P, P, Pcomb, N_J);
 
 # Get period indices for time-series analysis
 period_idx, period_labels, N_periods = get_period_indices();
@@ -234,9 +244,9 @@ log_msg("Observations: $N_obs, Households: $N_HH, Alternatives: $N_J, Periods: $
 
 # Read θ_hat from the estimates CSV produced by 02_Estimation_Mixture.jl.
 if HPC
-    estimates_path = "/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/02_Second_Stage_Estimation_V2/Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results/Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates/Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates.csv"
+    estimates_path = "/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/02_Second_Stage_Estimation_Mixture_Holdout/Dynamic_Model_Mixture_Holdout_$(psi_tag)_$(beta_tag)_Results/Dynamic_Model_Mixture_Holdout_$(psi_tag)_$(beta_tag)_Estimates/Dynamic_Model_Mixture_Holdout_$(psi_tag)_$(beta_tag)_Estimates.csv"
 else
-    estimates_path = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results/Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates/Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates.csv"
+    estimates_path = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Mixture_Holdout_$(psi_tag)_$(beta_tag)_Results/Dynamic_Model_Mixture_Holdout_$(psi_tag)_$(beta_tag)_Estimates/Dynamic_Model_Mixture_Holdout_$(psi_tag)_$(beta_tag)_Estimates.csv"
 end
 df_est = CSV.read(estimates_path, DataFrame)
 
@@ -260,25 +270,25 @@ end
 # Isolate structural parameters (ψ_1 is always fixed; no ESTIMATE_PSI_S)
 θ_struct_all = θ_hat
 
-# Extract parameters 
-common   = θ_struct_all[1:13]   # α_C, α_E, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E
-ξ_1      = θ_struct_all[14:16]  # ξ_C_1, ξ_E_1, ξ_CE_1
-ξ_2      = θ_struct_all[17:19]  # ξ_C_2, ξ_E_2, ξ_CE_2
-ξ_3      = θ_struct_all[20:22]  # ξ_C_3, ξ_E_3, ξ_CE_3
-π_0_2    = θ_struct_all[23]     # type 2 baseline logit intercept
-π_TYA_2  = θ_struct_all[24]     # type 2 TYA share shifter
-π_0_3    = θ_struct_all[25]     # type 3 baseline logit intercept
-π_TYA_3  = θ_struct_all[26]     # type 3 TYA share shifter
+# Extract parameters
+common   = θ_struct_all[1:14]   # α_C, α_E, α_E2, α_CE, λ_1, λ_2, λ_3, λ_4, γ_1, γ_2, γ_3, γ_4, ω_C, ω_E
+ξ_1      = θ_struct_all[15:17]  # ξ_C_1, ξ_E_1, ξ_CE_1
+ξ_2      = θ_struct_all[18:20]  # ξ_C_2, ξ_E_2, ξ_CE_2
+ξ_3      = θ_struct_all[21:23]  # ξ_C_3, ξ_E_3, ξ_CE_3
+π_0_2    = θ_struct_all[24]     # type 2 baseline logit intercept
+π_TYA_2  = θ_struct_all[25]     # type 2 TYA share shifter
+π_0_3    = θ_struct_all[26]     # type 3 baseline logit intercept
+π_TYA_3  = θ_struct_all[27]     # type 3 TYA share shifter
 
-# Override PSI_3 from estimated position 27 when ESTIMATE_PSI_3 is true
+# Override PSI_3 from estimated position 28 when ESTIMATE_PSI_3 is true
 if ESTIMATE_PSI_3
-    PSI_3 = θ_struct_all[27]
-    log_msg(@sprintf("ψ_3 = %.6f (estimated, extracted from θ_hat[27])", PSI_3))
+    PSI_3 = θ_struct_all[28]
+    log_msg(@sprintf("ψ_3 = %.6f (estimated, extracted from θ_hat[28])", PSI_3))
 else
-    log_msg(@sprintf("ψ_3 = %.6f (fixed, from ENV)", PSI_3))
+    log_msg(@sprintf("ψ_3 grid seed = %.6f (from ENV; the estimate itself is θ_hat[28])", PSI_3))
 end
 
-# Construct per-type structural parameter vectors 
+# Construct per-type structural parameter vectors
 θ_struct_1 = vcat(common, ξ_1)
 θ_struct_2 = vcat(common, ξ_2)
 θ_struct_3 = vcat(common, ξ_3)
@@ -288,7 +298,7 @@ log_msg("\nMixing weight parameters:")
 log_msg(@sprintf("  π_0_2   = %.6f  π_TYA_2 = %.6f", π_0_2, π_TYA_2))
 log_msg(@sprintf("  π_0_3   = %.6f  π_TYA_3 = %.6f", π_0_3, π_TYA_3))
 
-# Compute mixing weights at tya_share = 0 and tya_share = 1 for reference 
+# Compute mixing weights at tya_share = 0 and tya_share = 1 for reference
 for tya_ref in [0.0, 1.0]
     l2 = π_0_2 + π_TYA_2 * tya_ref
     l3 = π_0_3 + π_TYA_3 * tya_ref
@@ -331,6 +341,15 @@ aflav_continuous = simulate_addiction_trajectories(N_A_flav, PSI_3, A_flav, n_fl
 # Print and log addiction state computation time
 states_elapsed = time() - t_states
 log_msg("Addiction states computed in $(round(states_elapsed, digits=1))s")
+
+# Extract terminal 2022 addiction stocks: the last observation of each household's
+# 2021-2022 sequence. These become the starting stocks for the 2023 simulation.
+af_terminal    = [af_continuous[hh_ranges[h][2]]    for h in 1:N_HH]
+as_terminal    = [as_continuous[hh_ranges[h][2]]    for h in 1:N_HH]
+aflav_terminal = [aflav_continuous[hh_ranges[h][2]] for h in 1:N_HH]
+
+# Map household code → estimation household index (for aligning with 2023 data)
+est_hh_code_to_idx = Dict(hh_codes[hh_ranges[h][1]] => h for h in 1:N_HH)
 
 
 #############################
@@ -476,7 +495,7 @@ t_pred = time()
 # N_J alternatives at every observation). Step 2 then reaches into each row and
 # pulls out only the column for the alternative the household actually chose,
 # probs_k[i, y[i]], where y[i] is the index of the observed choice at row i.
-# Because V_k differs across types, this extracted probability also differs:
+# V_k differs across types, so this extracted probability also differs:
 #
 #       probs_1[i, y[i]] ≠ probs_2[i, y[i]] ≠ probs_3[i, y[i]]
 #
@@ -505,7 +524,7 @@ t_pred = time()
 #   denominator        →  exp(logsumexp([a_1, a_2, a_3])), computed via logsumexp
 #   P(k | y_h)         →  exp(a_k - logsumexp([a_1, a_2, a_3])) = hh_posterior[h, k]
 #
-# The denominator ensures the three posteriors sum to 1 across types.
+# The denominator makes the three posteriors sum to 1 across types.
 # Everything stays in log space until the final exp() call so that multiplying
 # many small probabilities together never underflows to zero.
 #
@@ -590,221 +609,112 @@ GC.gc()
 
 
 #############################
-# Price Elasticities
+# Load 2023 Validation Data
 #############################
 
+# Switch working directory to the 2023 holdout data.
+# Household_Codes, Product_Choices, Category_Choices, TYA_States, and Prices
+# are all 2023-specific. The alternative-level files (Consumption_Spaces,
+# Nicotine_Spaces, Pricing_Spaces, Halton draws) were copied from Data_Holdout/
+# unchanged and are not reloaded here; they are already in memory.
 log_msg("\n===================================")
-log_msg("Computing price elasticities...")
+log_msg("Loading 2023 holdout validation data from Data_Holdout_Val/...")
 log_msg("===================================")
 
-t_elas = time()
+cd(dir_val)
 
-# 1% permanent price increase
-PRICE_SHOCK = 0.01  
+# 2023 observation structure
+hh_codes  = get_hh_codes()
+hh_ranges = precompute_hh_ranges(hh_codes)
+N_HH      = length(hh_ranges)
 
-# For each observation i and alternative j, the mixture-integrated choice probability is:
-#   P(j | i) = w1_h * probs_1[i,j] + w2_h * probs_2[i,j] + w3_h * probs_3[i,j]
-# where w1_h, w2_h, w3_h are household h's posterior type weights computed above.
-# Multiplying by the indicator has_cig[j] (or has_ecig[j]) and summing over j gives
-# the marginal cig (or ecig) purchase probability for observation i. Averaging over
-# all N observations gives the predicted aggregate market share among all households in the data.
-# has_cig[j]: true if alternative j contains cigarettes (cat 1 or bundles 5-7)
-# has_ecig[j]: true if alternative j contains e-cigarettes (cats 2-7)
-function compute_mixture_shares(
-    probs_1, probs_2, probs_3,
-    hh_posterior, hh_ranges,
-    has_cig, has_ecig
-)
-    N = size(probs_1, 1)
-    s_cig = 0.0; s_ecig = 0.0
-    for h in eachindex(hh_ranges)
-        start_i, stop_i = hh_ranges[h]
-        w1, w2, w3 = hh_posterior[h, 1], hh_posterior[h, 2], hh_posterior[h, 3]  # posterior weights
-        for i in start_i:stop_i
-            for j in eachindex(has_cig)
-                p_ij    = w1 * probs_1[i, j] + w2 * probs_2[i, j] + w3 * probs_3[i, j]  # mixture prob
-                s_cig  += has_cig[j]  * p_ij  # cig indicator × mixture prob
-                s_ecig += has_ecig[j] * p_ij  # ecig indicator × mixture prob
-            end
-        end
-    end
-    return s_cig / N, s_ecig / N  # average shares across all N observations
+# 2023 observed choices
+_, _, J_val = get_product_choices()
+y           = get_hh_choices(J_val)
+N_obs       = length(y)
+
+# 2023 TYA states (same 1-indexing convention: no-TYA=1, TYA=2)
+tya_state = [s + 1 for s in get_tya_states()]
+
+# 2023 observed prices (mapped to the same price grid estimated on 2021-2022 data)
+_, p_continuous = map_prices_to_grid(N_P, P, Pcomb, N_J)
+
+# 2023 period indices (used for streak boundary detection in simulation comparisons)
+period_idx, period_labels, N_periods = get_period_indices()
+
+log_msg("2023 validation data loaded: $N_obs observations, $N_HH households, $N_periods periods")
+
+# Build Dict{household_code, terminal_stock} for the 2023 validation sample.
+# The simulation functions (simulate_household_sequences_mixture and its callers)
+# type af0/as0/aflav0 as AbstractDict and access stocks via af0[hh_code], so
+# these must be Dicts keyed by household code rather than position-indexed vectors.
+# I look up each 2023 household's code, find its 2021-2022 position in
+# est_hh_code_to_idx, and pull the corresponding terminal stock.
+af_val    = Dict{eltype(hh_codes), Float64}()
+as_val    = Dict{eltype(hh_codes), Float64}()
+aflav_val = Dict{eltype(hh_codes), Float64}()
+for h_val in 1:N_HH
+    code  = hh_codes[hh_ranges[h_val][1]]
+    h_est = est_hh_code_to_idx[code]
+    af_val[code]    = af_terminal[h_est]
+    as_val[code]    = as_terminal[h_est]
+    aflav_val[code] = aflav_terminal[h_est]
 end
+log_msg("Terminal 2022 addiction stocks mapped to 2023 households.")
+log_msg(@sprintf("  Mean af_terminal: %.6f   Mean as_terminal: %.6f   Mean aflav_terminal: %.6f",
+    mean(values(af_val)), mean(values(as_val)), mean(values(aflav_val))))
 
-# --- Baseline probs 
-log_msg("  Re-computing baseline choice probabilities...")
-probs_1_b = compute_predicted_probs(V_choice_1, tya_state, af_continuous, as_continuous, aflav_continuous, p_continuous, N_J, N_P, A_f, A_s, A_flav, P)
-probs_2_b = compute_predicted_probs(V_choice_2, tya_state, af_continuous, as_continuous, aflav_continuous, p_continuous, N_J, N_P, A_f, A_s, A_flav, P)
-probs_3_b = compute_predicted_probs(V_choice_3, tya_state, af_continuous, as_continuous, aflav_continuous, p_continuous, N_J, N_P, A_f, A_s, A_flav, P)
-s_cig_b, s_ecig_b = compute_mixture_shares(probs_1_b, probs_2_b, probs_3_b, hh_posterior, hh_ranges, has_cig, has_ecig)
-log_msg(@sprintf("  Baseline:  cig share = %.4f,  ecig share = %.4f", s_cig_b, s_ecig_b))
+# Remap posterior type weights to the 2023 household ordering.
+# hh_posterior (N_HH_est × 3) rows correspond to the 2021-2022 all-HH estimation
+# ordering. After the data switch, hh_ranges has N_HH rows in the 2023 overlap-HH
+# ordering. Build hh_posterior_val and tya_share_val aligned with the 2023 ordering
+# so simulation calls receive posteriors for the correct household at each row.
+hh_posterior_val = Matrix{Float64}(undef, N_HH, 3)
+tya_share_val    = Vector{Float64}(undef, N_HH)
+for h_val in 1:N_HH
+    code  = hh_codes[hh_ranges[h_val][1]]
+    h_est = est_hh_code_to_idx[code]
+    hh_posterior_val[h_val, :] = hh_posterior[h_est, :]
+    tya_share_val[h_val]       = tya_share_hh[h_est]
+end
+log_msg("Posterior type weights remapped to 2023 household ordering.")
 
 
-# ===========================================================================
-# Dynamic Elasticities
+#############################
+# Modal Latent Type Masks
+#############################
+
+# Assign each 2023 household to its modal latent type: the argmax of the
+# posterior computed on the 2021-2022 training sample (ties go to the lower
+# index, matching the counterfactual code). The masks below are observation-
+# level and are used ONLY to restrict which observations are counted in the
+# by-type validation statistics. The forward simulation is unchanged: each
+# draw still samples every household's type from its full posterior.
 #
-# A static elasticity would re-evaluate softmax probabilities at a higher
-# price while holding V_choice fixed. That captures only the within-period
-# substitution effect. In a dynamic model, a permanent price increase also
-# revises forward-looking behavior: households anticipate higher prices in
-# every future period, which reduces the value of building up addiction
-# stocks (since quitting becomes relatively cheaper). This feedback is only
-# captured by re-solving the full Bellman equation under the shocked price
-# grid. The resulting V_choice_shocked gives a long-run
-# dynamic elasticity rather than a static one.
-#
-#
-# My approach is to solve VFI on the shocked grid, evaluate at original p_continuous.
-# Shifting Pcomb[:, 1] .*= (1.0 + PRICE_SHOCK):
-# grid index m now represents a price with a 1% increase of its original value.
-# The Bellman equation encodes optimal behavior assuming permanently higher prices
-# at every grid point. V_shocked[m] is the lifetime value at grid index m in a
-# world where that index is 1% more expensive than before. Evaluating at the
-# original p_continuous then asks: "how does a household with observed price
-# p_continuous[i] behave when expecting prices to be permanently 1% higher?"
-# ===========================================================================
+# Type 1 households are the cigarette-persistent group, so their cigarette
+# statistics are the informative ones; type 2 households are the e-cigarette-
+# persistent group, so their e-cigarette statistics are the informative ones.
+# Both products are computed for both masks (it is free); the figure scripts
+# pick the relevant product for each type.
+modal_type_val = [argmax(hh_posterior_val[h, :]) for h in 1:N_HH]
 
-log_msg("  Re-solving VFI under permanently shocked price grids...")
-
-# --- Cig price shock ---
-Pcomb_cig = copy(Pcomb); Pcomb_cig[:, 1] .*= (1.0 + PRICE_SHOCK)
-
-# Recompute flow utility for all three types under the shocked cig prices.
-U_1_cg = get_flow_utility(
-    θ_struct_1, N_J, N_A_f, N_A_s, N_A_flav, N_Pcomb, A_f, A_s, A_flav,
-    q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, is_nonflavored_ecig, is_outside, cat_idx, Pcomb_cig, has_cig, has_ecig
-)
-U_2_cg = get_flow_utility(
-    θ_struct_2, N_J, N_A_f, N_A_s, N_A_flav, N_Pcomb, A_f, A_s, A_flav,
-    q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, is_nonflavored_ecig, is_outside, cat_idx, Pcomb_cig, has_cig, has_ecig
-)
-U_3_cg = get_flow_utility(
-    θ_struct_3, N_J, N_A_f, N_A_s, N_A_flav, N_Pcomb, A_f, A_s, A_flav,
-    q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, is_nonflavored_ecig, is_outside, cat_idx, Pcomb_cig, has_cig, has_ecig
-)
-
-# Re-solve VFI for all three types concurrently.
-cg_task_1 = Threads.@spawn solve_vfi_sophisticated(
-    N_J, N_A_f, N_A_s, N_A_flav, N_P, N_Pcomb, β, δ, U_1_cg,
-    af_lower, af_upper, af_weight, as_lower, as_upper, as_weight,
-    aflav_lower, aflav_upper, aflav_weight,
-    p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w;
-    V_init = nothing, ε = VFI_TOL, verbose = false
-)
-cg_task_2 = Threads.@spawn solve_vfi_sophisticated(
-    N_J, N_A_f, N_A_s, N_A_flav, N_P, N_Pcomb, β, δ, U_2_cg,
-    af_lower, af_upper, af_weight, as_lower, as_upper, as_weight,
-    aflav_lower, aflav_upper, aflav_weight,
-    p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w;
-    V_init = nothing, ε = VFI_TOL, verbose = false
-)
-cg_task_3 = Threads.@spawn solve_vfi_sophisticated(
-    N_J, N_A_f, N_A_s, N_A_flav, N_P, N_Pcomb, β, δ, U_3_cg,
-    af_lower, af_upper, af_weight, as_lower, as_upper, as_weight,
-    aflav_lower, aflav_upper, aflav_weight,
-    p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w;
-    V_init = nothing, ε = VFI_TOL, verbose = false
-)
-
-# fetch() blocks the main thread until each task finishes
-_, V_cg_1, _, _ = fetch(cg_task_1)
-_, V_cg_2, _, _ = fetch(cg_task_2)
-_, V_cg_3, _, _ = fetch(cg_task_3)
-
-# Evaluate the shocked V_choice_k at the ORIGINAL observed prices p_continuous.
-probs_1_cg = compute_predicted_probs(V_cg_1, tya_state, af_continuous, as_continuous, aflav_continuous, p_continuous, N_J, N_P, A_f, A_s, A_flav, P)
-probs_2_cg = compute_predicted_probs(V_cg_2, tya_state, af_continuous, as_continuous, aflav_continuous, p_continuous, N_J, N_P, A_f, A_s, A_flav, P)
-probs_3_cg = compute_predicted_probs(V_cg_3, tya_state, af_continuous, as_continuous, aflav_continuous, p_continuous, N_J, N_P, A_f, A_s, A_flav, P)
-s_cig_cg, s_ecig_cg = compute_mixture_shares(probs_1_cg, probs_2_cg, probs_3_cg, hh_posterior, hh_ranges, has_cig, has_ecig)
-
-# Long-run arc elasticity: ε = (Δs / s_baseline) / (Δp / p) = (Δs / s_baseline) / PRICE_SHOCK
-ε_cig_own_lr   = (s_cig_cg  - s_cig_b)  / s_cig_b  / PRICE_SHOCK
-ε_ecig_xcig_lr = (s_ecig_cg - s_ecig_b) / s_ecig_b / PRICE_SHOCK
-
-# --- Ecig price shock ---
-Pcomb_ecig = copy(Pcomb); Pcomb_ecig[:, 2] .*= (1.0 + PRICE_SHOCK)
-
-U_1_eg = get_flow_utility(
-    θ_struct_1, N_J, N_A_f, N_A_s, N_A_flav, N_Pcomb, A_f, A_s, A_flav,
-    q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, is_nonflavored_ecig, is_outside, cat_idx, Pcomb_ecig, has_cig, has_ecig
-)
-U_2_eg = get_flow_utility(
-    θ_struct_2, N_J, N_A_f, N_A_s, N_A_flav, N_Pcomb, A_f, A_s, A_flav,
-    q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, is_nonflavored_ecig, is_outside, cat_idx, Pcomb_ecig, has_cig, has_ecig
-)
-U_3_eg = get_flow_utility(
-    θ_struct_3, N_J, N_A_f, N_A_s, N_A_flav, N_Pcomb, A_f, A_s, A_flav,
-    q_cig, q_ecig, q_bundle, is_flavored, is_fda_flavored, is_nonflavored_ecig, is_outside, cat_idx, Pcomb_ecig, has_cig, has_ecig
-)
-
-# Same parallel VFI pattern as cig shock; each type's U_k_eg differs via θ_struct_k.
-eg_task_1 = Threads.@spawn solve_vfi_sophisticated(
-    N_J, N_A_f, N_A_s, N_A_flav, N_P, N_Pcomb, β, δ, U_1_eg,
-    af_lower, af_upper, af_weight, as_lower, as_upper, as_weight,
-    aflav_lower, aflav_upper, aflav_weight,
-    p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w;
-    V_init = nothing, ε = VFI_TOL, verbose = false
-)
-eg_task_2 = Threads.@spawn solve_vfi_sophisticated(
-    N_J, N_A_f, N_A_s, N_A_flav, N_P, N_Pcomb, β, δ, U_2_eg,
-    af_lower, af_upper, af_weight, as_lower, as_upper, as_weight,
-    aflav_lower, aflav_upper, aflav_weight,
-    p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w;
-    V_init = nothing, ε = VFI_TOL, verbose = false
-)
-eg_task_3 = Threads.@spawn solve_vfi_sophisticated(
-    N_J, N_A_f, N_A_s, N_A_flav, N_P, N_Pcomb, β, δ, U_3_eg,
-    af_lower, af_upper, af_weight, as_lower, as_upper, as_weight,
-    aflav_lower, aflav_upper, aflav_weight,
-    p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w;
-    V_init = nothing, ε = VFI_TOL, verbose = false
-)
-
-_, V_eg_1, _, _ = fetch(eg_task_1)
-_, V_eg_2, _, _ = fetch(eg_task_2)
-_, V_eg_3, _, _ = fetch(eg_task_3)
-
-# Evaluate shocked V_choice_k at original p_continuous
-probs_1_eg = compute_predicted_probs(V_eg_1, tya_state, af_continuous, as_continuous, aflav_continuous, p_continuous, N_J, N_P, A_f, A_s, A_flav, P)
-probs_2_eg = compute_predicted_probs(V_eg_2, tya_state, af_continuous, as_continuous, aflav_continuous, p_continuous, N_J, N_P, A_f, A_s, A_flav, P)
-probs_3_eg = compute_predicted_probs(V_eg_3, tya_state, af_continuous, as_continuous, aflav_continuous, p_continuous, N_J, N_P, A_f, A_s, A_flav, P)
-s_cig_eg, s_ecig_eg = compute_mixture_shares(probs_1_eg, probs_2_eg, probs_3_eg, hh_posterior, hh_ranges, has_cig, has_ecig)
-
-# Evaluate elasticities
-ε_ecig_own_lr  = (s_ecig_eg - s_ecig_b) / s_ecig_b / PRICE_SHOCK
-ε_cig_xecig_lr = (s_cig_eg  - s_cig_b)  / s_cig_b  / PRICE_SHOCK
-
-
-# --- Log results ---
-elas_elapsed = time() - t_elas
-log_msg(@sprintf("\nPrice elasticities computed in %.1fs", elas_elapsed))
-
-log_msg("\n  --- Dynamic Price Elasticities (permanent shock; V_choice re-solved) ---")
-log_msg(rpad("  ε(cig,  p_cig)",  28) * @sprintf("= %+.4f  (own-price)",   ε_cig_own_lr))
-log_msg(rpad("  ε(ecig, p_cig)",  28) * @sprintf("= %+.4f  (cross-price)", ε_ecig_xcig_lr))
-log_msg(rpad("  ε(ecig, p_ecig)", 28) * @sprintf("= %+.4f  (own-price)",   ε_ecig_own_lr))
-log_msg(rpad("  ε(cig,  p_ecig)", 28) * @sprintf("= %+.4f  (cross-price)", ε_cig_xecig_lr))
-
-# --- Save to CSV ---
-path_elas = joinpath(output_dir, "Price_Elasticities.csv")
-open(path_elas, "w") do io
-    println(io, "demand,price,elasticity")
-    for (dem, pr, val) in [
-        ("cig",  "p_cig",  ε_cig_own_lr),
-        ("ecig", "p_cig",  ε_ecig_xcig_lr),
-        ("ecig", "p_ecig", ε_ecig_own_lr),
-        ("cig",  "p_ecig", ε_cig_xecig_lr),
-    ]
-        println(io, "$dem,$pr,$(@sprintf("%.8f", val))")
+mask_type1 = falses(N_obs)
+mask_type2 = falses(N_obs)
+for h in 1:N_HH
+    start_idx, stop_idx = hh_ranges[h]
+    if modal_type_val[h] == 1
+        mask_type1[start_idx:stop_idx] .= true
+    elseif modal_type_val[h] == 2
+        mask_type2[start_idx:stop_idx] .= true
     end
 end
-log_msg("Elasticities saved to: $path_elas")
 
-# Free the six probability matrices allocated for the elasticity exercise
-probs_1_b = probs_2_b = probs_3_b = nothing
-probs_1_cg = probs_2_cg = probs_3_cg = nothing
-probs_1_eg = probs_2_eg = probs_3_eg = nothing
-GC.gc()
+# label => obs_mask pairs passed to the validation functions via extra_masks
+type_masks = ["Type1" => mask_type1, "Type2" => mask_type2]
+
+log_msg(@sprintf("Modal type counts (2023 households): type 1 = %d, type 2 = %d, type 3 = %d",
+    count(==(1), modal_type_val), count(==(2), modal_type_val), count(==(3), modal_type_val)))
+log_msg(@sprintf("Observation counts: type 1 = %d, type 2 = %d", count(mask_type1), count(mask_type2)))
 
 
 #############################
@@ -823,100 +733,18 @@ t_sim = time()
 #     [streak_length, mean_continuation_rate, avg_N] for each product type
 #   streak_all_ci / streak_tya_ci: Dict of (max_streak × 2) matrices
 #     [p025, p975] confidence bands across S draws
+#   streak_extra / streak_extra_ci: Dict{"Type1"/"Type2" => same layout}
 # These are compared to actual_streaks_* computed from observed y below.
 sim_results = run_simulation_validation(
-    V_choice_1, V_choice_2, V_choice_3, hh_posterior, hh_ranges,
-    tya_state, p_continuous, hh_codes, af0, as0, aflav0,
+    V_choice_1, V_choice_2, V_choice_3, hh_posterior_val, hh_ranges,
+    tya_state, p_continuous, hh_codes, af_val, as_val, aflav_val,
     n, n_flav, ψ_2, ψ_1, PSI_3, N_J, N_P, A_f, A_s, A_flav, P,
     cat_idx, period_idx, S;
-    base_seed=12345, max_streak=max_streak
+    base_seed=12345, max_streak=max_streak, extra_masks=type_masks
 )
 
 sim_elapsed = time() - t_sim
 log_msg("\nSimulation completed in $(round(sim_elapsed, digits=1))s")
-
-
-#############################
-# Run Post-Purchase Path
-# Validation
-#############################
-
-log_msg("\n===================================")
-log_msg("Running post-purchase path validation ($S draws)...")
-log_msg("===================================\n")
-
-t_ppp = time()
-
-# Source categories: flavored e-cig purchases (cat 3, 4, 6, 7)
-source_cats_flav = (3, 4, 6, 7)
-
-# Simulated post-purchase paths (averaged over S draws)
-ppp_sim_results = run_post_purchase_path_validation(
-    V_choice_1, V_choice_2, V_choice_3, hh_posterior, hh_ranges,
-    tya_state, p_continuous, hh_codes, af0, as0, aflav0,
-    n, n_flav, ψ_2, ψ_1, PSI_3, N_J, N_P, A_f, A_s, A_flav, P,
-    cat_idx, period_idx, source_cats_flav, S;
-    base_seed=12345, max_horizon=12
-)
-
-# Observed post-purchase paths (from actual choice data)
-# TYA observation mask (reused below for streaks as well)
-mask_tya_ppp = [tya_state[i] == 2 for i in eachindex(tya_state)]
-
-actual_ppp_all, actual_ppp_n_all = compute_post_purchase_paths(
-    y, cat_idx, hh_codes, period_idx, source_cats_flav;
-    max_horizon=12
-)
-
-actual_ppp_tya, actual_ppp_n_tya = compute_post_purchase_paths(
-    y, cat_idx, hh_codes, period_idx, source_cats_flav;
-    obs_mask=mask_tya_ppp, max_horizon=12
-)
-
-ppp_flav_elapsed = time() - t_ppp
-log_msg("\nPost-purchase path validation (flavored) completed in $(round(ppp_flav_elapsed, digits=1))s")
-log_msg("  Events (observed): All=$actual_ppp_n_all, TYA=$actual_ppp_n_tya")
-log_msg("  Events (sim draw 1): All=$(ppp_sim_results.n_events_all), TYA=$(ppp_sim_results.n_events_tya)")
-
-
-#############################
-# Run Post-Purchase Path
-# Validation (Cigarettes)
-#############################
-
-log_msg("\n===================================")
-log_msg("Running post-purchase path validation - cigarette purchases ($S draws)...")
-log_msg("===================================\n")
-
-t_ppp_cig = time()
-
-# Source categories: cigarette purchases (cat 1)
-source_cats_cig = (1,)
-
-# Simulated post-purchase paths (averaged over S draws)
-ppp_cig_sim_results = run_post_purchase_path_validation(
-    V_choice_1, V_choice_2, V_choice_3, hh_posterior, hh_ranges,
-    tya_state, p_continuous, hh_codes, af0, as0, aflav0,
-    n, n_flav, ψ_2, ψ_1, PSI_3, N_J, N_P, A_f, A_s, A_flav, P,
-    cat_idx, period_idx, source_cats_cig, S;
-    base_seed=54321, max_horizon=12
-)
-
-# Observed post-purchase paths (from actual choice data)
-actual_ppp_cig_all, actual_ppp_cig_n_all = compute_post_purchase_paths(
-    y, cat_idx, hh_codes, period_idx, source_cats_cig;
-    max_horizon=12
-)
-
-actual_ppp_cig_tya, actual_ppp_cig_n_tya = compute_post_purchase_paths(
-    y, cat_idx, hh_codes, period_idx, source_cats_cig;
-    obs_mask=mask_tya_ppp, max_horizon=12
-)
-
-ppp_cig_elapsed = time() - t_ppp_cig
-log_msg("\nPost-purchase path validation (cigarettes) completed in $(round(ppp_cig_elapsed, digits=1))s")
-log_msg("  Events (observed): All=$actual_ppp_cig_n_all, TYA=$actual_ppp_cig_n_tya")
-log_msg("  Events (sim draw 1): All=$(ppp_cig_sim_results.n_events_all), TYA=$(ppp_cig_sim_results.n_events_tya)")
 
 
 #############################
@@ -929,7 +757,7 @@ log_msg("  Events (sim draw 1): All=$(ppp_cig_sim_results.n_events_all), TYA=$(p
 # sim_results.streak_* is the validation test.
 
 # TYA observation mask (same mask used in run_simulation_validation above)
-mask_tya = [tya_state[i] == 2 for i in eachindex(tya_state)]
+mask_tya    = [tya_state[i] == 2 for i in eachindex(tya_state)]
 
 # Actual streak persistence for all households
 actual_streaks_all = compute_sim_streak_continuation(
@@ -943,6 +771,21 @@ actual_streaks_tya = compute_sim_streak_continuation(
     obs_mask=mask_tya, max_streak=max_streak
 )
 
+# Actual streak persistence by modal type (Dict: "Type1"/"Type2" => streak Dict)
+actual_streaks_type = Dict(el => compute_sim_streak_continuation(
+    y, cat_idx, hh_codes, period_idx;
+    obs_mask=mask_el, max_streak=max_streak
+) for (el, mask_el) in type_masks)
+
+# Ordered list of subgroups used by every print/save loop below:
+# (print label, file suffix, actual, simulated, simulated CI)
+streak_groups = [
+    ("All",          "All",   actual_streaks_all,           sim_results.streak_all,             sim_results.streak_all_ci),
+    ("TYA Present",  "TYA",   actual_streaks_tya,           sim_results.streak_tya,             sim_results.streak_tya_ci),
+    ("Type 1",       "Type1", actual_streaks_type["Type1"], sim_results.streak_extra["Type1"],  sim_results.streak_extra_ci["Type1"]),
+    ("Type 2",       "Type2", actual_streaks_type["Type2"], sim_results.streak_extra["Type2"],  sim_results.streak_extra_ci["Type2"])
+]
+
 
 #############################
 # Print Streak Persistence
@@ -953,23 +796,20 @@ log_msg("\n===================================")
 log_msg("Streak Persistence Curves")
 log_msg("===================================")
 
-# For each TYA group and product type, print the empirical continuation rate
-# (Actual) vs. the mean simulated rate (Simulated), their difference
-# (sim − actual; positive = model overpredicts persistence), and the
-# simulation's [2.5%, 97.5%] confidence band across S draws.
-for (tya_label, actual_streaks, sim_streaks, sim_ci) in [
-    ("All",         actual_streaks_all, sim_results.streak_all, sim_results.streak_all_ci),
-    ("TYA Present", actual_streaks_tya, sim_results.streak_tya, sim_results.streak_tya_ci)
-]
+# For each subgroup (All, TYA, modal type 1, modal type 2) and product type, print
+# the empirical continuation rate (Actual) vs. the mean simulated rate
+# (Simulated), their difference (sim − actual; positive = model overpredicts
+# persistence), and the simulation's [2.5%, 97.5%] confidence band across S draws.
+for (tya_label, _, actual_streaks, sim_streaks, sim_ci) in streak_groups
 
     log_msg("\n  --- $tya_label ---")
 
     for (label, full_label) in [("cig", "Cigarettes"), ("ecig", "E-Cigarettes"), ("flav_ecig", "Flavored E-Cigarettes"), ("orig_ecig", "Original E-Cigarettes")]
 
-        # actual_res: max_streak × 3 — col 1 = streak length k, col 2 = empirical
+        # actual_res: max_streak × 3; col 1 = streak length k, col 2 = empirical
         #             continuation rate, col 3 = N (observations at streak length k)
-        # sim_res:    max_streak × 3 — col 2 = mean simulated continuation rate
-        # ci_res:     max_streak × 2 — col 1 = p025, col 2 = p975 across S draws
+        # sim_res:    max_streak × 3; col 2 = mean simulated continuation rate
+        # ci_res:     max_streak × 2; col 1 = p025, col 2 = p975 across S draws
         actual_res = actual_streaks[label]
         sim_res    = sim_streaks[label]
         ci_res     = sim_ci[label]
@@ -1010,11 +850,10 @@ end
 # Save Results
 #############################
 
-# Write Streak_Persistence_{All,TYA}.csv. 
-for (tya_label, tya_suffix, actual_streaks, sim_streaks, sim_ci) in [
-    ("All",         "All", actual_streaks_all, sim_results.streak_all, sim_results.streak_all_ci),
-    ("TYA Present", "TYA", actual_streaks_tya, sim_results.streak_tya, sim_results.streak_tya_ci)
-]
+# Write Streak_Persistence_{All,TYA,Type1,Type2}.csv. The Type1 file's
+# cigarette rows and the Type2 file's e-cigarette rows are the ones the paper
+# uses; the other product rows are written for completeness.
+for (tya_label, tya_suffix, actual_streaks, sim_streaks, sim_ci) in streak_groups
 
     path_streak = joinpath(output_dir, "Streak_Persistence_$(tya_suffix).csv")
     open(path_streak, "w") do io
@@ -1045,10 +884,10 @@ open(path_posterior, "w") do io
     println(io, "household_idx,posterior_type1,posterior_type2,posterior_type3,tya_share")
     for h in 1:N_HH
         println(io, join([string(h),
-            @sprintf("%.10f", hh_posterior[h, 1]),
-            @sprintf("%.10f", hh_posterior[h, 2]),
-            @sprintf("%.10f", hh_posterior[h, 3]),
-            @sprintf("%.10f", tya_share_hh[h])], ","))
+            @sprintf("%.10f", hh_posterior_val[h, 1]),
+            @sprintf("%.10f", hh_posterior_val[h, 2]),
+            @sprintf("%.10f", hh_posterior_val[h, 3]),
+            @sprintf("%.10f", tya_share_val[h])], ","))
     end
 end
 
@@ -1056,173 +895,36 @@ log_msg("\nStreak results saved to: $output_dir")
 
 
 #############################
-# Print Post-Purchase Path
-# Results (Flavored E-Cig)
-#############################
-
-log_msg("\n===================================")
-log_msg("Post-Purchase Paths (after Flavored E-Cig Purchase)")
-log_msg("===================================")
-
-# For each TYA group, print post-purchase paths after a flavored e-cig purchase.
-# Each row is one horizon month h (1–12). Columns show the actual and simulated
-# share of households in each product category at horizon h, plus the [2.5%, 97.5%]
-# confidence band.
-for (tya_label, actual_paths, sim_paths, ci_paths) in [
-    ("All",         actual_ppp_all, ppp_sim_results.paths_all, ppp_sim_results.paths_all_ci),
-    ("TYA Present", actual_ppp_tya, ppp_sim_results.paths_tya, ppp_sim_results.paths_tya_ci)
-]
-
-    log_msg("\n  --- $tya_label ---")
-    log_msg(@sprintf("  %-8s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s",
-        "Horizon",
-        "Act Flav", "Sim Flav", "CI025 Flav", "CI975 Flav",
-        "Act Orig", "Sim Orig", "CI025 Orig", "CI975 Orig",
-        "Act Cig",  "Sim Cig",  "CI025 Cig",  "CI975 Cig",
-        "Act Out",  "Sim Out",  "CI025 Out",  "CI975 Out"))
-    log_msg("  " * repeat("-", 179))
-
-    for h in 1:size(actual_paths, 1)
-        log_msg(@sprintf("  %-8d  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f",
-            h,
-            actual_paths[h, 1], sim_paths[h, 1], ci_paths[h, 1], ci_paths[h, 2],
-            actual_paths[h, 2], sim_paths[h, 2], ci_paths[h, 3], ci_paths[h, 4],
-            actual_paths[h, 3], sim_paths[h, 3], ci_paths[h, 5], ci_paths[h, 6],
-            actual_paths[h, 4], sim_paths[h, 4], ci_paths[h, 7], ci_paths[h, 8]))
-    end
-end
-
-
-#############################
-# Print Post-Purchase Path
-# Results (Cigarettes)
-#############################
-
-log_msg("\n===================================")
-log_msg("Post-Purchase Paths (after Cigarette Purchase)")
-log_msg("===================================")
-
-# Same layout as the flavored e-cig post-purchase path table above, but
-# households are tracked starting from a cigarette purchase (source_cats_cig).
-for (tya_label, actual_paths, sim_paths, ci_paths) in [
-    ("All",         actual_ppp_cig_all, ppp_cig_sim_results.paths_all, ppp_cig_sim_results.paths_all_ci),
-    ("TYA Present", actual_ppp_cig_tya, ppp_cig_sim_results.paths_tya, ppp_cig_sim_results.paths_tya_ci)
-]
-
-    log_msg("\n  --- $tya_label ---")
-    log_msg(@sprintf("  %-8s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s  %10s",
-        "Horizon",
-        "Act Flav", "Sim Flav", "CI025 Flav", "CI975 Flav",
-        "Act Orig", "Sim Orig", "CI025 Orig", "CI975 Orig",
-        "Act Cig",  "Sim Cig",  "CI025 Cig",  "CI975 Cig",
-        "Act Out",  "Sim Out",  "CI025 Out",  "CI975 Out"))
-    log_msg("  " * repeat("-", 179))
-
-    for h in 1:size(actual_paths, 1)
-        log_msg(@sprintf("  %-8d  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f  %10.4f",
-            h,
-            actual_paths[h, 1], sim_paths[h, 1], ci_paths[h, 1], ci_paths[h, 2],
-            actual_paths[h, 2], sim_paths[h, 2], ci_paths[h, 3], ci_paths[h, 4],
-            actual_paths[h, 3], sim_paths[h, 3], ci_paths[h, 5], ci_paths[h, 6],
-            actual_paths[h, 4], sim_paths[h, 4], ci_paths[h, 7], ci_paths[h, 8]))
-    end
-end
-
-
-#############################
-# Save Post-Purchase Path
-# Results (Flavored E-Cig)
-#############################
-
-
-# Function to write results
-function write_ppp_csv(path, actual_paths, sim_paths, ci_paths)
-    open(path, "w") do io
-        # ci_paths columns: [p025_flav, p975_flav, p025_orig, p975_orig, p025_cig, p975_cig, p025_out, p975_out, p025_ecig, p975_ecig]
-        println(io, join(["horizon",
-            "actual_flav_ecig", "actual_orig_ecig", "actual_ecig", "actual_cig", "actual_outside",
-            "sim_flav_ecig", "sim_orig_ecig", "sim_ecig", "sim_cig", "sim_outside",
-            "ci_025_flav_ecig", "ci_975_flav_ecig",
-            "ci_025_orig_ecig", "ci_975_orig_ecig",
-            "ci_025_ecig", "ci_975_ecig",
-            "ci_025_cig", "ci_975_cig",
-            "ci_025_outside", "ci_975_outside"], ","))
-        for h in 1:size(actual_paths, 1)
-            println(io, join([
-                string(h),
-                @sprintf("%.10f", actual_paths[h, 1]),   # flav_ecig
-                @sprintf("%.10f", actual_paths[h, 2]),   # orig_ecig
-                @sprintf("%.10f", actual_paths[h, 5]),   # ecig (combined)
-                @sprintf("%.10f", actual_paths[h, 3]),   # cig
-                @sprintf("%.10f", actual_paths[h, 4]),   # outside
-                @sprintf("%.10f", sim_paths[h, 1]),      # sim flav_ecig
-                @sprintf("%.10f", sim_paths[h, 2]),      # sim orig_ecig
-                @sprintf("%.10f", sim_paths[h, 5]),      # sim ecig (combined)
-                @sprintf("%.10f", sim_paths[h, 3]),      # sim cig
-                @sprintf("%.10f", sim_paths[h, 4]),      # sim outside
-                @sprintf("%.10f", ci_paths[h, 1]),       # ci_025 flav_ecig
-                @sprintf("%.10f", ci_paths[h, 2]),       # ci_975 flav_ecig
-                @sprintf("%.10f", ci_paths[h, 3]),       # ci_025 orig_ecig
-                @sprintf("%.10f", ci_paths[h, 4]),       # ci_975 orig_ecig
-                @sprintf("%.10f", ci_paths[h, 9]),       # ci_025 ecig (combined)
-                @sprintf("%.10f", ci_paths[h, 10]),      # ci_975 ecig (combined)
-                @sprintf("%.10f", ci_paths[h, 5]),       # ci_025 cig
-                @sprintf("%.10f", ci_paths[h, 6]),       # ci_975 cig
-                @sprintf("%.10f", ci_paths[h, 7]),       # ci_025 outside
-                @sprintf("%.10f", ci_paths[h, 8])        # ci_975 outside
-            ], ","))
-        end
-    end
-end
-
-# Write Post_Purchase_Paths_Flav_{All,TYA}.csv via write_ppp_csv above.
-for (tya_suffix, actual_paths, sim_paths, ci_paths) in [
-    ("All", actual_ppp_all, ppp_sim_results.paths_all, ppp_sim_results.paths_all_ci),
-    ("TYA", actual_ppp_tya, ppp_sim_results.paths_tya, ppp_sim_results.paths_tya_ci)
-]
-    write_ppp_csv(joinpath(output_dir, "Post_Purchase_Paths_Flav_$(tya_suffix).csv"), actual_paths, sim_paths, ci_paths)
-end
-
-log_msg("\nFlavored e-cig post-purchase path results saved to: $output_dir")
-
-
-#############################
-# Save Post-Purchase Path
-# Results (Cigarettes)
-#############################
-
-# Write Post_Purchase_Paths_Cig_{All,TYA}.csv via write_ppp_csv above.
-for (tya_suffix, actual_paths, sim_paths, ci_paths) in [
-    ("All", actual_ppp_cig_all, ppp_cig_sim_results.paths_all, ppp_cig_sim_results.paths_all_ci),
-    ("TYA", actual_ppp_cig_tya, ppp_cig_sim_results.paths_tya, ppp_cig_sim_results.paths_tya_ci)
-]
-    write_ppp_csv(joinpath(output_dir, "Post_Purchase_Paths_Cig_$(tya_suffix).csv"), actual_paths, sim_paths, ci_paths)
-end
-
-log_msg("\nCigarette post-purchase path results saved to: $output_dir")
-
-
-#############################
 # Quantity Escalation
 #############################
+
+# Quantities in original units (packs for cigarettes, mL of e-liquid for
+# e-cigarettes), undoing the max-standardization used in estimation.
+q_cig_raw  = q_cig  .* q_cig_max
+q_ecig_raw = q_ecig .* q_ecig_max
 
 
 # Streak definition: mirrors compute_sim_streak_continuation exactly.
 # Cig streak uses has_cig (cat 1 and 5,6,7); ecig streak uses has_ecig
 # (cat 2,3,4,5,6,7). Bundles are included because addiction builds from any
 # cig-containing (or ecig-containing) purchase, regardless of bundling.
+# A third track restricts the e-cigarette streak to flavored alternatives
+# (is_flavored: cat 3,4,6,7), so a streak counts consecutive months with a
+# flavored purchase and the quantity is the mL of e-liquid in those months.
 #
-# Runs inside an S-draw loop 
+# Runs inside an S-draw loop
 log_msg("\n===================================")
 log_msg("Quantity Escalation ($S draws)...")
 log_msg("===================================\n")
 
 t_qty = time()
 
-# --- Group definitions (All / TYA present) ---
-qty_group_labels   = ["All", "TYA Present"]
-qty_group_suffixes = ["All", "TYA"]
-qty_group_masks    = [trues(N_obs), mask_tya]
+# --- Group definitions (All / TYA present / modal type 1 / modal type 2) ---
+# The Type1 cigarette file and the Type2 e-cigarette file are the ones the paper
+# uses; the cross products are written for completeness.
+qty_group_labels   = ["All", "TYA Present", "Type 1", "Type 2"]
+qty_group_suffixes = ["All", "TYA", "Type1", "Type2"]
+qty_group_masks    = [trues(N_obs), mask_tya, mask_type1, mask_type2]
 N_qty_groups       = length(qty_group_labels)
 
 # --- Empirical streak lengths from observed y ---
@@ -1231,6 +933,7 @@ N_qty_groups       = length(qty_group_labels)
 # (i == 1 or household/period boundary) or after a non-purchasing period.
 streak_cig_data  = zeros(Int, N_obs)
 streak_ecig_data = zeros(Int, N_obs)
+streak_flav_data = zeros(Int, N_obs)
 for i in 1:N_obs
     if !has_cig[y[i]]
         streak_cig_data[i] = 0
@@ -1246,6 +949,13 @@ for i in 1:N_obs
     else
         streak_ecig_data[i] = has_ecig[y[i-1]] ? streak_ecig_data[i-1] + 1 : 1
     end
+    if !is_flavored[y[i]]
+        streak_flav_data[i] = 0
+    elseif i == 1 || hh_codes[i] != hh_codes[i-1] || period_idx[i] != period_idx[i-1] + 1
+        streak_flav_data[i] = 1
+    else
+        streak_flav_data[i] = is_flavored[y[i-1]] ? streak_flav_data[i-1] + 1 : 1
+    end
 end
 
 # --- Empirical mean quantity by streak length, by TYA group ---
@@ -1253,6 +963,8 @@ mean_cig_qty_data  = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
 mean_ecig_qty_data = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
 cig_qty_n_data     = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
 ecig_qty_n_data    = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
+mean_flav_qty_data = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
+flav_qty_n_data    = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
 for g in 1:N_qty_groups
     mask = qty_group_masks[g]
     for i in 1:N_obs
@@ -1260,21 +972,89 @@ for g in 1:N_qty_groups
         j  = y[i]
         kc = min(streak_cig_data[i],  max_streak)
         if kc >= 1 && has_cig[j]
-            mean_cig_qty_data[g][kc]  += q_cig[j]
+            mean_cig_qty_data[g][kc]  += q_cig_raw[j]
             cig_qty_n_data[g][kc]     += 1.0
         end
         ke = min(streak_ecig_data[i], max_streak)
         if ke >= 1 && has_ecig[j]
-            mean_ecig_qty_data[g][ke] += q_ecig[j]
+            mean_ecig_qty_data[g][ke] += q_ecig_raw[j]
             ecig_qty_n_data[g][ke]    += 1.0
+        end
+        kf = min(streak_flav_data[i], max_streak)
+        if kf >= 1 && is_flavored[j]
+            mean_flav_qty_data[g][kf] += q_ecig_raw[j]
+            flav_qty_n_data[g][kf]    += 1.0
         end
     end
     # Convert accumulated sums to means
     for k in 1:max_streak
         mean_cig_qty_data[g][k]  = cig_qty_n_data[g][k]  > 0 ? mean_cig_qty_data[g][k]  / cig_qty_n_data[g][k]  : NaN
         mean_ecig_qty_data[g][k] = ecig_qty_n_data[g][k] > 0 ? mean_ecig_qty_data[g][k] / ecig_qty_n_data[g][k] : NaN
+        mean_flav_qty_data[g][k] = flav_qty_n_data[g][k] > 0 ? mean_flav_qty_data[g][k] / flav_qty_n_data[g][k] : NaN
     end
 end
+
+# --- Median quantity by streak length ---
+# The mean is a noisy statistic for e-liquid because the quantity bins are wide
+# (a single top-bin purchase moves a thin cell's mean by several mL). The median
+# is not. It is computed from a tally of purchases by alternative j at
+# each streak length: tally[k, j] = number of qualifying purchases of alternative
+# j at streak length k. The median is then the weighted median of q_cig_raw[j] (or
+# q_ecig_raw[j]) with those counts as weights. The same tallies are written to CSV
+# so the full simulated vs. observed bin distribution can be inspected.
+
+# Weighted median of `qvals` with non-negative integer-valued `counts`.
+# Uses the midpoint of the two middle order statistics for even totals.
+function weighted_median(counts::AbstractVector{<:Real}, qvals::AbstractVector{<:Real})
+    total = sum(counts)
+    total <= 0 && return NaN
+    ord = sortperm(qvals)
+    n   = Int(round(total))
+    # positions of the middle order statistic(s), 1-indexed
+    p_lo = (n + 1) ÷ 2
+    p_hi = (n + 2) ÷ 2
+    cum = 0.0; v_lo = NaN; v_hi = NaN
+    for idx in ord
+        c = counts[idx]
+        c <= 0 && continue
+        cum += c
+        if isnan(v_lo) && cum >= p_lo
+            v_lo = qvals[idx]
+        end
+        if cum >= p_hi
+            v_hi = qvals[idx]
+            break
+        end
+    end
+    return (v_lo + v_hi) / 2
+end
+
+# Empirical tallies (max_streak × N_J) and medians, by group
+cig_qty_tally_data  = [zeros(Float64, max_streak, N_J) for _ in 1:N_qty_groups]
+ecig_qty_tally_data = [zeros(Float64, max_streak, N_J) for _ in 1:N_qty_groups]
+flav_qty_tally_data = [zeros(Float64, max_streak, N_J) for _ in 1:N_qty_groups]
+for g in 1:N_qty_groups
+    mask = qty_group_masks[g]
+    for i in 1:N_obs
+        !mask[i] && continue
+        j  = y[i]
+        kc = min(streak_cig_data[i],  max_streak)
+        if kc >= 1 && has_cig[j]
+            cig_qty_tally_data[g][kc, j] += 1.0
+        end
+        ke = min(streak_ecig_data[i], max_streak)
+        if ke >= 1 && has_ecig[j]
+            ecig_qty_tally_data[g][ke, j] += 1.0
+        end
+        kf = min(streak_flav_data[i], max_streak)
+        if kf >= 1 && is_flavored[j]
+            flav_qty_tally_data[g][kf, j] += 1.0
+        end
+    end
+end
+med_cig_qty_data  = [[weighted_median(view(cig_qty_tally_data[g],  k, :), q_cig_raw)  for k in 1:max_streak] for g in 1:N_qty_groups]
+med_ecig_qty_data = [[weighted_median(view(ecig_qty_tally_data[g], k, :), q_ecig_raw) for k in 1:max_streak] for g in 1:N_qty_groups]
+med_flav_qty_data = [[weighted_median(view(flav_qty_tally_data[g], k, :), q_ecig_raw) for k in 1:max_streak] for g in 1:N_qty_groups]
 
 # --- Simulation draw accumulators ---
 cig_qty_draws         = [fill(NaN, max_streak, S)  for _ in 1:N_qty_groups]
@@ -1283,6 +1063,18 @@ acc_cig_qty_sum        = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
 acc_cig_qty_n          = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
 acc_ecig_qty_sum       = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
 acc_ecig_qty_n         = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
+flav_qty_draws         = [fill(NaN, max_streak, S)  for _ in 1:N_qty_groups]
+acc_flav_qty_sum       = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
+acc_flav_qty_n         = [zeros(Float64, max_streak) for _ in 1:N_qty_groups]
+
+# Median accumulators: per-draw medians (for CI bands) and pooled tallies across
+# draws (for the point estimate, mirroring how the mean pools across draws)
+cig_med_draws          = [fill(NaN, max_streak, S)  for _ in 1:N_qty_groups]
+ecig_med_draws         = [fill(NaN, max_streak, S)  for _ in 1:N_qty_groups]
+flav_med_draws         = [fill(NaN, max_streak, S)  for _ in 1:N_qty_groups]
+acc_cig_qty_tally      = [zeros(Float64, max_streak, N_J) for _ in 1:N_qty_groups]
+acc_ecig_qty_tally     = [zeros(Float64, max_streak, N_J) for _ in 1:N_qty_groups]
+acc_flav_qty_tally     = [zeros(Float64, max_streak, N_J) for _ in 1:N_qty_groups]
 
 QUANT_BASE_SEED = 11111
 
@@ -1295,14 +1087,15 @@ for s in 1:S
     # Addiction stocks evolve endogenously from simulated choices.
     rng     = MersenneTwister(QUANT_BASE_SEED + s)
     sim_y_q = simulate_household_sequences_mixture(
-        V_choice_1, V_choice_2, V_choice_3, hh_posterior, hh_ranges,
-        tya_state, p_continuous, hh_codes, af0, as0, aflav0,
+        V_choice_1, V_choice_2, V_choice_3, hh_posterior_val, hh_ranges,
+        tya_state, p_continuous, hh_codes, af_val, as_val, aflav_val,
         n, n_flav, ψ_2, ψ_1, PSI_3, N_J, N_P, A_f, A_s, A_flav, P, rng
     )
 
     # Simulated streak lengths (identical logic to empirical computation above)
     streak_cig_s  = zeros(Int, N_obs)
     streak_ecig_s = zeros(Int, N_obs)
+    streak_flav_s = zeros(Int, N_obs)
     for i in 1:N_obs
         j = sim_y_q[i]
         if !has_cig[j]
@@ -1319,6 +1112,13 @@ for s in 1:S
         else
             streak_ecig_s[i] = has_ecig[sim_y_q[i-1]] ? streak_ecig_s[i-1] + 1 : 1
         end
+        if !is_flavored[j]
+            streak_flav_s[i] = 0
+        elseif i == 1 || hh_codes[i] != hh_codes[i-1] || period_idx[i] != period_idx[i-1] + 1
+            streak_flav_s[i] = 1
+        else
+            streak_flav_s[i] = is_flavored[sim_y_q[i-1]] ? streak_flav_s[i-1] + 1 : 1
+        end
     end
 
     # Accumulate quantity escalation for each TYA group in a single pass over observations
@@ -1328,17 +1128,29 @@ for s in 1:S
         qty_cig_n    = zeros(Float64, max_streak)
         qty_ecig_sum = zeros(Float64, max_streak)
         qty_ecig_n   = zeros(Float64, max_streak)
+        qty_flav_sum = zeros(Float64, max_streak)
+        qty_flav_n   = zeros(Float64, max_streak)
+        tally_cig_s  = zeros(Float64, max_streak, N_J)
+        tally_ecig_s = zeros(Float64, max_streak, N_J)
+        tally_flav_s = zeros(Float64, max_streak, N_J)
         for i in 1:N_obs
             !mask[i] && continue
             j  = sim_y_q[i]
             # Quantity escalation: accumulate q at each streak length
             kc = min(streak_cig_s[i],  max_streak)
             if kc >= 1 && has_cig[j]
-                qty_cig_sum[kc] += q_cig[j];   qty_cig_n[kc]  += 1.0
+                qty_cig_sum[kc] += q_cig_raw[j];   qty_cig_n[kc]  += 1.0
+                tally_cig_s[kc, j] += 1.0
             end
             ke = min(streak_ecig_s[i], max_streak)
             if ke >= 1 && has_ecig[j]
-                qty_ecig_sum[ke] += q_ecig[j]; qty_ecig_n[ke] += 1.0
+                qty_ecig_sum[ke] += q_ecig_raw[j]; qty_ecig_n[ke] += 1.0
+                tally_ecig_s[ke, j] += 1.0
+            end
+            kf = min(streak_flav_s[i], max_streak)
+            if kf >= 1 && is_flavored[j]
+                qty_flav_sum[kf] += q_ecig_raw[j]; qty_flav_n[kf] += 1.0
+                tally_flav_s[kf, j] += 1.0
             end
         end
         for k in 1:max_streak
@@ -1346,7 +1158,16 @@ for s in 1:S
             ecig_qty_draws[g][k, s] = qty_ecig_n[k] > 0 ? qty_ecig_sum[k] / qty_ecig_n[k] : NaN
             acc_cig_qty_sum[g][k]   += qty_cig_sum[k];   acc_cig_qty_n[g][k]  += qty_cig_n[k]
             acc_ecig_qty_sum[g][k]  += qty_ecig_sum[k];  acc_ecig_qty_n[g][k] += qty_ecig_n[k]
+            flav_qty_draws[g][k, s] = qty_flav_n[k] > 0 ? qty_flav_sum[k] / qty_flav_n[k] : NaN
+            acc_flav_qty_sum[g][k]  += qty_flav_sum[k];  acc_flav_qty_n[g][k] += qty_flav_n[k]
+            # Per-draw medians from this draw's tallies
+            cig_med_draws[g][k, s]  = weighted_median(view(tally_cig_s,  k, :), q_cig_raw)
+            ecig_med_draws[g][k, s] = weighted_median(view(tally_ecig_s, k, :), q_ecig_raw)
+            flav_med_draws[g][k, s] = weighted_median(view(tally_flav_s, k, :), q_ecig_raw)
         end
+        acc_cig_qty_tally[g]  .+= tally_cig_s
+        acc_ecig_qty_tally[g] .+= tally_ecig_s
+        acc_flav_qty_tally[g] .+= tally_flav_s
     end
 end
 
@@ -1354,13 +1175,14 @@ qty_elapsed = time() - t_qty
 log_msg("\nQuantity validation completed in $(round(qty_elapsed, digits=1))s")
 
 # Quantity escalation point estimates: pooled ratio, i.e. (total quantity across all
-# S draws) / (total qualifying household-months across all S draws). 
+# S draws) / (total qualifying household-months across all S draws).
 # Pooling weights each draw by its own event count (a draw with 500
 # qualifying household-months at streak k contributes more than one with 5), and a
 # draw with zero events at streak k contributes 0 to both sums rather than producing
-# an undefined per-draw ratio that has to be dropped. 
+# an undefined per-draw ratio that has to be dropped.
 mean_cig_qty_sim    = [[acc_cig_qty_n[g][k]  > 0 ? acc_cig_qty_sum[g][k]  / acc_cig_qty_n[g][k]  : NaN for k in 1:max_streak] for g in 1:N_qty_groups]
 mean_ecig_qty_sim   = [[acc_ecig_qty_n[g][k] > 0 ? acc_ecig_qty_sum[g][k] / acc_ecig_qty_n[g][k] : NaN for k in 1:max_streak] for g in 1:N_qty_groups]
+mean_flav_qty_sim   = [[acc_flav_qty_n[g][k] > 0 ? acc_flav_qty_sum[g][k] / acc_flav_qty_n[g][k] : NaN for k in 1:max_streak] for g in 1:N_qty_groups]
 
 # [2.5%, 97.5%] CI bands across S draws
 cig_qty_ci  = [hcat(
@@ -1370,6 +1192,29 @@ cig_qty_ci  = [hcat(
 ecig_qty_ci = [hcat(
     [let v = filter(!isnan, vec(ecig_qty_draws[g][k, :]));   isempty(v) ? NaN : quantile(v, 0.025) end for k in 1:max_streak],
     [let v = filter(!isnan, vec(ecig_qty_draws[g][k, :]));   isempty(v) ? NaN : quantile(v, 0.975) end for k in 1:max_streak]
+) for g in 1:N_qty_groups]
+flav_qty_ci = [hcat(
+    [let v = filter(!isnan, vec(flav_qty_draws[g][k, :]));   isempty(v) ? NaN : quantile(v, 0.025) end for k in 1:max_streak],
+    [let v = filter(!isnan, vec(flav_qty_draws[g][k, :]));   isempty(v) ? NaN : quantile(v, 0.975) end for k in 1:max_streak]
+) for g in 1:N_qty_groups]
+
+# Median point estimates: weighted median of the tallies pooled across all S draws
+med_cig_qty_sim  = [[weighted_median(view(acc_cig_qty_tally[g],  k, :), q_cig_raw)  for k in 1:max_streak] for g in 1:N_qty_groups]
+med_ecig_qty_sim = [[weighted_median(view(acc_ecig_qty_tally[g], k, :), q_ecig_raw) for k in 1:max_streak] for g in 1:N_qty_groups]
+med_flav_qty_sim = [[weighted_median(view(acc_flav_qty_tally[g], k, :), q_ecig_raw) for k in 1:max_streak] for g in 1:N_qty_groups]
+
+# [2.5%, 97.5%] bands for the median across S draws
+cig_med_ci  = [hcat(
+    [let v = filter(!isnan, vec(cig_med_draws[g][k, :]));    isempty(v) ? NaN : quantile(v, 0.025) end for k in 1:max_streak],
+    [let v = filter(!isnan, vec(cig_med_draws[g][k, :]));    isempty(v) ? NaN : quantile(v, 0.975) end for k in 1:max_streak]
+) for g in 1:N_qty_groups]
+ecig_med_ci = [hcat(
+    [let v = filter(!isnan, vec(ecig_med_draws[g][k, :]));   isempty(v) ? NaN : quantile(v, 0.025) end for k in 1:max_streak],
+    [let v = filter(!isnan, vec(ecig_med_draws[g][k, :]));   isempty(v) ? NaN : quantile(v, 0.975) end for k in 1:max_streak]
+) for g in 1:N_qty_groups]
+flav_med_ci = [hcat(
+    [let v = filter(!isnan, vec(flav_med_draws[g][k, :]));   isempty(v) ? NaN : quantile(v, 0.025) end for k in 1:max_streak],
+    [let v = filter(!isnan, vec(flav_med_draws[g][k, :]));   isempty(v) ? NaN : quantile(v, 0.975) end for k in 1:max_streak]
 ) for g in 1:N_qty_groups]
 
 
@@ -1382,60 +1227,41 @@ log_msg("\n===================================")
 log_msg("Quantity Escalation by Streak Length")
 log_msg("===================================")
 
-# For each TYA group and product, print mean standardized quantity at each
+# For each TYA group and product, print mean quantity in original units (packs or mL) at each
 # streak length k. A rising Data Mean with k confirms that households shift
 # toward higher-quantity bins as addiction builds. The Simulated column shows
 # whether the model captures that slope; Difference = sim − data.
 for (tya_label, g) in zip(qty_group_labels, 1:N_qty_groups)
     log_msg("\n  --- $tya_label ---")
 
-    log_msg("\n  Cigarettes:")
-    log_msg(@sprintf("  %-8s  %8s  %10s  %10s  %10s  %10s  %10s",
-        "Streak", "N_data", "Data Mean", "Sim Mean", "Difference", "CI_025", "CI_975"))
-    log_msg("  " * repeat("-", 79))
-    for k in 1:max_streak
-        n_k  = Int(cig_qty_n_data[g][k])
-        act  = mean_cig_qty_data[g][k]
-        (n_k == 0 || isnan(act)) && continue
-        sim   = mean_cig_qty_sim[g][k]
-        diff  = isnan(sim) ? NaN : sim - act
-        lo    = cig_qty_ci[g][k, 1]
-        hi    = cig_qty_ci[g][k, 2]
-        k_lbl = k == max_streak ? "$(k)+" : string(k)
-        if isnan(diff)
-            log_msg(@sprintf("  %-8s  %8d  %10.4f  %10s  %10s  %10s  %10s",
-                k_lbl, n_k, act, "N/A", "N/A", "N/A", "N/A"))
-        else
-            lo_str = isnan(lo) ? "N/A" : @sprintf("%.4f", lo)
-            hi_str = isnan(hi) ? "N/A" : @sprintf("%.4f", hi)
-            log_msg(@sprintf("  %-8s  %8d  %10.4f  %10.4f  %+10.4f  %10s  %10s",
-                k_lbl, n_k, act, sim, diff, lo_str, hi_str))
+    # Print one product's table: mean columns followed by median columns
+    function print_qty_table(label, n_data, mean_data, mean_sim, mean_ci, med_data, med_sim, med_ci)
+        log_msg("\n  $label:")
+        log_msg(@sprintf("  %-8s  %8s  %10s  %10s  %10s  %10s  %10s  |  %10s  %10s  %10s  %10s",
+            "Streak", "N_data", "Data Mean", "Sim Mean", "Difference", "CI_025", "CI_975",
+            "Data Med", "Sim Med", "MedCI_025", "MedCI_975"))
+        log_msg("  " * repeat("-", 127))
+        fmt(x) = isnan(x) ? "N/A" : @sprintf("%.4f", x)
+        for k in 1:max_streak
+            n_k  = Int(n_data[k])
+            act  = mean_data[k]
+            (n_k == 0 || isnan(act)) && continue
+            sim   = mean_sim[k]
+            diff  = isnan(sim) ? NaN : sim - act
+            k_lbl = k == max_streak ? "$(k)+" : string(k)
+            diff_str = isnan(diff) ? "N/A" : @sprintf("%+.4f", diff)
+            log_msg(@sprintf("  %-8s  %8d  %10.4f  %10s  %10s  %10s  %10s  |  %10s  %10s  %10s  %10s",
+                k_lbl, n_k, act, fmt(sim), diff_str, fmt(mean_ci[k, 1]), fmt(mean_ci[k, 2]),
+                fmt(med_data[k]), fmt(med_sim[k]), fmt(med_ci[k, 1]), fmt(med_ci[k, 2])))
         end
     end
 
-    log_msg("\n  E-Cigarettes:")
-    log_msg(@sprintf("  %-8s  %8s  %10s  %10s  %10s  %10s  %10s",
-        "Streak", "N_data", "Data Mean", "Sim Mean", "Difference", "CI_025", "CI_975"))
-    log_msg("  " * repeat("-", 79))
-    for k in 1:max_streak
-        n_k  = Int(ecig_qty_n_data[g][k])
-        act  = mean_ecig_qty_data[g][k]
-        (n_k == 0 || isnan(act)) && continue
-        sim   = mean_ecig_qty_sim[g][k]
-        diff  = isnan(sim) ? NaN : sim - act
-        lo    = ecig_qty_ci[g][k, 1]
-        hi    = ecig_qty_ci[g][k, 2]
-        k_lbl = k == max_streak ? "$(k)+" : string(k)
-        if isnan(diff)
-            log_msg(@sprintf("  %-8s  %8d  %10.4f  %10s  %10s  %10s  %10s",
-                k_lbl, n_k, act, "N/A", "N/A", "N/A", "N/A"))
-        else
-            lo_str = isnan(lo) ? "N/A" : @sprintf("%.4f", lo)
-            hi_str = isnan(hi) ? "N/A" : @sprintf("%.4f", hi)
-            log_msg(@sprintf("  %-8s  %8d  %10.4f  %10.4f  %+10.4f  %10s  %10s",
-                k_lbl, n_k, act, sim, diff, lo_str, hi_str))
-        end
-    end
+    print_qty_table("Cigarettes",   cig_qty_n_data[g],  mean_cig_qty_data[g],  mean_cig_qty_sim[g],  cig_qty_ci[g],
+                    med_cig_qty_data[g],  med_cig_qty_sim[g],  cig_med_ci[g])
+    print_qty_table("E-Cigarettes", ecig_qty_n_data[g], mean_ecig_qty_data[g], mean_ecig_qty_sim[g], ecig_qty_ci[g],
+                    med_ecig_qty_data[g], med_ecig_qty_sim[g], ecig_med_ci[g])
+    print_qty_table("Flavored E-Cigarettes", flav_qty_n_data[g], mean_flav_qty_data[g], mean_flav_qty_sim[g], flav_qty_ci[g],
+                    med_flav_qty_data[g], med_flav_qty_sim[g], flav_med_ci[g])
 end
 
 
@@ -1443,42 +1269,73 @@ end
 # Save Quantity Escalation Results
 #############################
 
-# Writes 2 × 2 = 4 CSV files (two metrics × two TYA groups):
-#   Quantity_Escalation_Cig_{All,TYA}.csv
-#   Quantity_Escalation_Ecig_{All,TYA}.csv
+# Writes 3 × 4 = 12 CSV files (three products × four subgroups):
+#   Quantity_Escalation_Cig_{All,TYA,Type1,Type2}.csv
+#   Quantity_Escalation_Ecig_{All,TYA,Type1,Type2}.csv
+#   Quantity_Escalation_FlavEcig_{All,TYA,Type1,Type2}.csv   (flavored e-cigarette streaks only)
+# Columns: the original mean columns, followed by median columns
+# (data_median_qty, sim_median_qty, med_ci_025, med_ci_975). Existing
+# readers that select the mean columns by name are unaffected.
+# Also writes the purchase tallies by quantity bin at each streak length:
+#   Quantity_Bin_Distribution_{Cig,Ecig,FlavEcig}_{All,TYA,Type1,Type2}.csv
+# with one row per (streak_length, alternative j): observed count and the
+# simulated count averaged over draws, so the full simulated vs. observed bin
+# distribution can be compared.
+function write_qty_csv(path, n_data, mean_data, mean_sim, mean_ci, med_data, med_sim, med_ci)
+    open(path, "w") do io
+        println(io, join(["streak_length", "n_data", "data_mean_qty", "sim_mean_qty", "ci_025", "ci_975",
+                          "data_median_qty", "sim_median_qty", "med_ci_025", "med_ci_975"], ","))
+        for k in 1:max_streak
+            n_k = Int(n_data[k])
+            n_k == 0 && continue
+            println(io, join([
+                k == max_streak ? "$(k)+" : string(k),
+                string(n_k),
+                @sprintf("%.10f", mean_data[k]),
+                @sprintf("%.10f", mean_sim[k]),
+                @sprintf("%.10f", mean_ci[k, 1]),
+                @sprintf("%.10f", mean_ci[k, 2]),
+                @sprintf("%.10f", med_data[k]),
+                @sprintf("%.10f", med_sim[k]),
+                @sprintf("%.10f", med_ci[k, 1]),
+                @sprintf("%.10f", med_ci[k, 2])
+            ], ","))
+        end
+    end
+end
+
+function write_bin_csv(path, tally_data, tally_sim_acc, qvals)
+    open(path, "w") do io
+        println(io, join(["streak_length", "alternative", "qty", "data_count", "sim_count_per_draw"], ","))
+        for k in 1:max_streak, j in 1:N_J
+            (tally_data[k, j] == 0 && tally_sim_acc[k, j] == 0) && continue
+            println(io, join([
+                k == max_streak ? "$(k)+" : string(k),
+                string(j),
+                @sprintf("%.10f", qvals[j]),
+                string(Int(tally_data[k, j])),
+                @sprintf("%.6f", tally_sim_acc[k, j] / S)
+            ], ","))
+        end
+    end
+end
+
 for (tya_suffix, g) in zip(qty_group_suffixes, 1:N_qty_groups)
-
-    open(joinpath(output_dir, "Quantity_Escalation_Cig_$(tya_suffix).csv"), "w") do io
-        println(io, join(["streak_length", "n_data", "data_mean_qty_std", "sim_mean_qty_std", "ci_025", "ci_975"], ","))
-        for k in 1:max_streak
-            n_k = Int(cig_qty_n_data[g][k])
-            n_k == 0 && continue
-            println(io, join([
-                k == max_streak ? "$(k)+" : string(k),
-                string(n_k),
-                @sprintf("%.10f", mean_cig_qty_data[g][k]),
-                @sprintf("%.10f", mean_cig_qty_sim[g][k]),
-                @sprintf("%.10f", cig_qty_ci[g][k, 1]),
-                @sprintf("%.10f", cig_qty_ci[g][k, 2])
-            ], ","))
-        end
-    end
-
-    open(joinpath(output_dir, "Quantity_Escalation_Ecig_$(tya_suffix).csv"), "w") do io
-        println(io, join(["streak_length", "n_data", "data_mean_qty_std", "sim_mean_qty_std", "ci_025", "ci_975"], ","))
-        for k in 1:max_streak
-            n_k = Int(ecig_qty_n_data[g][k])
-            n_k == 0 && continue
-            println(io, join([
-                k == max_streak ? "$(k)+" : string(k),
-                string(n_k),
-                @sprintf("%.10f", mean_ecig_qty_data[g][k]),
-                @sprintf("%.10f", mean_ecig_qty_sim[g][k]),
-                @sprintf("%.10f", ecig_qty_ci[g][k, 1]),
-                @sprintf("%.10f", ecig_qty_ci[g][k, 2])
-            ], ","))
-        end
-    end
+    write_qty_csv(joinpath(output_dir, "Quantity_Escalation_Cig_$(tya_suffix).csv"),
+                  cig_qty_n_data[g],  mean_cig_qty_data[g],  mean_cig_qty_sim[g],  cig_qty_ci[g],
+                  med_cig_qty_data[g],  med_cig_qty_sim[g],  cig_med_ci[g])
+    write_qty_csv(joinpath(output_dir, "Quantity_Escalation_Ecig_$(tya_suffix).csv"),
+                  ecig_qty_n_data[g], mean_ecig_qty_data[g], mean_ecig_qty_sim[g], ecig_qty_ci[g],
+                  med_ecig_qty_data[g], med_ecig_qty_sim[g], ecig_med_ci[g])
+    write_bin_csv(joinpath(output_dir, "Quantity_Bin_Distribution_Cig_$(tya_suffix).csv"),
+                  cig_qty_tally_data[g],  acc_cig_qty_tally[g],  q_cig_raw)
+    write_bin_csv(joinpath(output_dir, "Quantity_Bin_Distribution_Ecig_$(tya_suffix).csv"),
+                  ecig_qty_tally_data[g], acc_ecig_qty_tally[g], q_ecig_raw)
+    write_qty_csv(joinpath(output_dir, "Quantity_Escalation_FlavEcig_$(tya_suffix).csv"),
+                  flav_qty_n_data[g], mean_flav_qty_data[g], mean_flav_qty_sim[g], flav_qty_ci[g],
+                  med_flav_qty_data[g], med_flav_qty_sim[g], flav_med_ci[g])
+    write_bin_csv(joinpath(output_dir, "Quantity_Bin_Distribution_FlavEcig_$(tya_suffix).csv"),
+                  flav_qty_tally_data[g], acc_flav_qty_tally[g], q_ecig_raw)
 end
 
 log_msg("\nQuantity escalation results saved to: $output_dir")

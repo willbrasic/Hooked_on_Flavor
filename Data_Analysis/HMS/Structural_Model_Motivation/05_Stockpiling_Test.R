@@ -1,11 +1,11 @@
 ################################################################################
 # William Brasic
-# The Unvarersity of Arizona
+# The University of Arizona
 # wbrasic97@gmail.com
 # May 2026
 #
 # Tests for stockpiling behavior in cigarette and e-cigarette purchases.
-# The key test exploits the opposing predictions of addiction vs. stockpiling
+# The test uses the opposing predictions of addiction vs. stockpiling
 # for the transition to zero-purchase months following a high-purchase month:
 #
 #   1[c_it = 0] = a + b*c_{i,t-1} + HH FE + Month FE + e_it

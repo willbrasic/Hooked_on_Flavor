@@ -6,14 +6,14 @@
 # --------------------------------------------------------------
 
 ### Optional. Set the job name
-#SBATCH --job-name=CF_Bootstrap_Mixture_Agg
+#SBATCH --job-name=Dynamic_Model_Mixture_Standard_Errors
 
 
 # --------------------------------------------------------------
 # Output
 # --------------------------------------------------------------
 
-### Slurm stdout/stderr - captures Julia startup errors, module load failures, etc.
+### Slurm stdout/stderr: captures Julia startup errors, module load failures, etc.
 #SBATCH --output=slurm_%j.out
 #SBATCH --error=slurm_%j.err
 
@@ -43,46 +43,29 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 
-### REQUIRED. Single CPU for sequential aggregation (no Julia threading needed).
-#SBATCH --cpus-per-task=1
+### REQUIRED. Number of CPU cores for Julia threading. 94 is max for Puma and 28 is max for Ocelote
+#SBATCH --cpus-per-task=94
 
 ### REQUIRED. Memory per core (total = cpus-per-task × mem-per-cpu).
-#SBATCH --mem-per-cpu=5gb
+#SBATCH --mem-per-cpu=1gb
 
 ### REQUIRED. Specify the time required for this job, hhh:mm:ss
-#SBATCH --time=002:00:00
+#SBATCH --time=024:00:00
 
 
 # --------------------------------------------------------------
 # Estimation Flags
 # --------------------------------------------------------------
 
-# Forward flags to Julia.
-# Set at submission time (defaults apply if not provided).
-# Flags must match those used when running 02_CF_Mixture_Bootstrap_Slurm.sb.
+# Discount factor β, forwarded to Julia (default 1.0).
 #
-# Flags:
-#   ESTIMATE_PSI_3 (default: false)  Load ψ_3-estimated model results (27-param)
-#   PSI_3          (default: 0.75)   Fixed ψ_3 value (ignored when ESTIMATE_PSI_3=true)
-#   BETA           (default: 1.0)    Present-bias β (must match bootstrap submission)
-#   B              (default: 100)    Number of bootstrap draws to aggregate
+# Usage:
+#   Base model (β = 1.0):
+#     sbatch 01_Standard_Errors_Mixture_Slurm.sb
 #
-# Usage examples:
-#   Default (ψ_3=0.75 fixed, β=1.0, B=100):
-#     sbatch 03_CF_Bootstrap_Mixture_Aggregation_Slurm.sb
-#
-#   Test run aggregating only the first 2 draws:
-#     B=2 sbatch 03_CF_Bootstrap_Mixture_Aggregation_Slurm.sb
-#
-#   With β=0.70:
-#     BETA=0.70 sbatch 03_CF_Bootstrap_Mixture_Aggregation_Slurm.sb
-#
-#   With estimated ψ_3:
-#     ESTIMATE_PSI_3=true sbatch 03_CF_Bootstrap_Mixture_Aggregation_Slurm.sb
-export ESTIMATE_PSI_3=${ESTIMATE_PSI_3:-false}
-export PSI_3=${PSI_3:-0.75}
+#   Present bias (β = 0.70):
+#     BETA=0.70 sbatch 01_Standard_Errors_Mixture_Slurm.sb
 export BETA=${BETA:-1.0}
-export B=${B:-100}
 
 
 # --------------------------------------------------------------
@@ -92,8 +75,11 @@ export B=${B:-100}
 # Load Julia module
 module load julia
 
-# Navigate to the script directory
-cd /home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/04_CF_Mixture_V2_Bootstrap
+# Set Julia threads for VFI parallelization over price states
+export JULIA_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+# Change to the script directory
+cd /home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/03_Standard_Errors_Mixture
 
 # Run script
-julia 03_CF_Bootstrap_Mixture_Aggregation.jl
+julia 01_Standard_Errors_Mixture.jl

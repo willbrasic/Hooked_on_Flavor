@@ -6,7 +6,7 @@
 #
 # This script creates functions specific to the counterfactual flavor ban
 # simulation. Functions are ordered by their execution sequence in
-# 02_CF_Mixture_Bootstrap.jl and handle:
+# 02_CF_Mixture.jl and handle:
 #   - Applying bans and taxes to flow utilities
 #   - Interpolating V_choice at continuous states
 #   - Computing pointwise choice probabilities and welfare at observed states
@@ -17,17 +17,17 @@
 ################################################################################
 # Table of Contents
 #
-#  1. Flavor Bans         — Zero out flow utility for banned categories.
+#  1. Flavor Bans         - Zero out flow utility for banned categories.
 #                           Comprehensive, FDA-only, and non-FDA-only variants.
 #
-#  2. Flavor Tax          — Shift flow utility down for taxed categories.
+#  2. Flavor Tax          - Shift flow utility down for taxed categories.
 #                           Same three variants as the bans.
 #
-#  3. Pointwise Outcomes  — Interpolate a single type's V_choice at each
+#  3. Pointwise Outcomes  - Interpolate a single type's V_choice at each
 #                           observed state, then compute choice probabilities
-#                           and welfare.
+#                           and welfare. 
 #
-#  4. Aggregation         — Average Monte Carlo paths into period-by-period
+#  4. Aggregation         - Average Monte Carlo paths into period-by-period
 #                           category shares, mean addiction, and mean welfare.
 #                           Subgroup variants stratify by TYA status and modal
 #                           latent type. A separate
@@ -55,30 +55,6 @@ function apply_flavor_ban!(
 
     for j in 1:N_J
         if cat_idx[j] in (3, 4, 6, 7)
-            U_ban[:, j, :, :, :, :] .= -Inf
-        end
-    end
-
-    return nothing
-end
-
-
-# --- FDA-Only Ban ---
-
-"""
-FDA-only flavor ban: set flow utility to -Inf for FDA-authorized flavored
-alternatives only (cat_idx in {4, 7}). Non-FDA flavored alternatives
-(cat_idx 3, 6) remain available.
-"""
-function apply_fda_flavor_ban!(
-    U_ban::Array{Float64, 6},
-    cat_idx::AbstractVector{<:Integer}
-)
-
-    N_J = size(U_ban, 2)
-
-    for j in 1:N_J
-        if cat_idx[j] in (4, 7)
             U_ban[:, j, :, :, :, :] .= -Inf
         end
     end
@@ -155,6 +131,112 @@ end
 #############################
 # 3. Pointwise Outcomes
 #############################
+
+# --- Ex-Ante Value at a Continuous State ---
+
+"""
+5-linearly interpolate the sophisticated-agent value function V_now (no alternative
+dimension) at a continuous state (af, as, aflav, p_cig, p_ecig).
+
+Returns:
+- v_interp: interpolated V_now scalar at the given continuous state
+"""
+function interpolate_v_now(
+    V_now::Array{Float64, 5},
+    tya_idx::Integer,
+    af::Real,
+    as::Real,
+    aflav::Real,
+    obs_cig::Real,
+    obs_ecig::Real,
+    N_P::Integer,
+    A_f::AbstractVector{<:Real},
+    A_s::AbstractVector{<:Real},
+    A_flav::AbstractVector{<:Real},
+    P::AbstractMatrix{<:Real}
+)
+
+    # Number of addiction grid points
+    N_A_f = length(A_f)
+    N_A_s = length(A_s)
+    N_A_flav = length(A_flav)
+
+    # 1D price grids
+    P_cig  = @view P[:, 1]
+    P_ecig = @view P[:, 2]
+
+    # Clamp continuous fast addiction to grid bounds
+    af_i = clamp(af, A_f[1], A_f[end])
+    hi_af = clamp(searchsortedfirst(A_f, af_i), 1, N_A_f)
+    lo_af = clamp(hi_af - 1, 1, N_A_f)
+    w_af = (lo_af == hi_af) ? 0.0 : (af_i - A_f[lo_af]) / (A_f[hi_af] - A_f[lo_af])
+
+    # Clamp continuous slow addiction to grid bounds
+    as_i = clamp(as, A_s[1], A_s[end])
+    hi_as = clamp(searchsortedfirst(A_s, as_i), 1, N_A_s)
+    lo_as = clamp(hi_as - 1, 1, N_A_s)
+    w_as = (lo_as == hi_as) ? 0.0 : (as_i - A_s[lo_as]) / (A_s[hi_as] - A_s[lo_as])
+
+    # Clamp continuous flavored habit to grid bounds
+    aflav_i = clamp(aflav, A_flav[1], A_flav[end])
+    hi_aflav = clamp(searchsortedfirst(A_flav, aflav_i), 1, N_A_flav)
+    lo_aflav = clamp(hi_aflav - 1, 1, N_A_flav)
+    w_aflav = (lo_aflav == hi_aflav) ? 0.0 : (aflav_i - A_flav[lo_aflav]) / (A_flav[hi_aflav] - A_flav[lo_aflav])
+
+    # Clamp continuous prices to grid bounds
+    cig_clamped  = clamp(obs_cig, P_cig[1], P_cig[end])
+    ecig_clamped = clamp(obs_ecig, P_ecig[1], P_ecig[end])
+
+    # Cigarette price brackets
+    hi_c = clamp(searchsortedfirst(P_cig, cig_clamped), 1, N_P)
+    lo_c = clamp(hi_c - 1, 1, N_P)
+    w_c  = (lo_c == hi_c) ? 0.0 : (cig_clamped - P_cig[lo_c]) / (P_cig[hi_c] - P_cig[lo_c])
+
+    # E-cigarette price brackets
+    hi_e = clamp(searchsortedfirst(P_ecig, ecig_clamped), 1, N_P)
+    lo_e = clamp(hi_e - 1, 1, N_P)
+    w_e  = (lo_e == hi_e) ? 0.0 : (ecig_clamped - P_ecig[lo_e]) / (P_ecig[hi_e] - P_ecig[lo_e])
+
+    # Combined price grid indices for bilinear interpolation (4 corners)
+    p_ll = (lo_c - 1) * N_P + lo_e
+    p_lh = (lo_c - 1) * N_P + hi_e
+    p_hl = (hi_c - 1) * N_P + lo_e
+    p_hh = (hi_c - 1) * N_P + hi_e
+
+    # Bilinear price weights
+    w_ll = (1 - w_c) * (1 - w_e)
+    w_lh = (1 - w_c) * w_e
+    w_hl = w_c * (1 - w_e)
+    w_hh = w_c * w_e
+
+    # 8 addiction corner weights (trilinear over fast × slow × flavored)
+    w_fff = (1 - w_af) * (1 - w_as) * (1 - w_aflav)
+    w_ffs = (1 - w_af) * (1 - w_as) * w_aflav
+    w_fsf = (1 - w_af) * w_as * (1 - w_aflav)
+    w_fss = (1 - w_af) * w_as * w_aflav
+    w_sff = w_af * (1 - w_as) * (1 - w_aflav)
+    w_sfs = w_af * (1 - w_as) * w_aflav
+    w_ssf = w_af * w_as * (1 - w_aflav)
+    w_sss = w_af * w_as * w_aflav
+
+    # Bilinear price interpolation at each of the 8 addiction corners
+    v_fff = w_ll * V_now[tya_idx, lo_af, lo_as, lo_aflav, p_ll] + w_lh * V_now[tya_idx, lo_af, lo_as, lo_aflav, p_lh] + w_hl * V_now[tya_idx, lo_af, lo_as, lo_aflav, p_hl] + w_hh * V_now[tya_idx, lo_af, lo_as, lo_aflav, p_hh]
+    v_ffs = w_ll * V_now[tya_idx, lo_af, lo_as, hi_aflav, p_ll] + w_lh * V_now[tya_idx, lo_af, lo_as, hi_aflav, p_lh] + w_hl * V_now[tya_idx, lo_af, lo_as, hi_aflav, p_hl] + w_hh * V_now[tya_idx, lo_af, lo_as, hi_aflav, p_hh]
+    v_fsf = w_ll * V_now[tya_idx, lo_af, hi_as, lo_aflav, p_ll] + w_lh * V_now[tya_idx, lo_af, hi_as, lo_aflav, p_lh] + w_hl * V_now[tya_idx, lo_af, hi_as, lo_aflav, p_hl] + w_hh * V_now[tya_idx, lo_af, hi_as, lo_aflav, p_hh]
+    v_fss = w_ll * V_now[tya_idx, lo_af, hi_as, hi_aflav, p_ll] + w_lh * V_now[tya_idx, lo_af, hi_as, hi_aflav, p_lh] + w_hl * V_now[tya_idx, lo_af, hi_as, hi_aflav, p_hl] + w_hh * V_now[tya_idx, lo_af, hi_as, hi_aflav, p_hh]
+    v_sff = w_ll * V_now[tya_idx, hi_af, lo_as, lo_aflav, p_ll] + w_lh * V_now[tya_idx, hi_af, lo_as, lo_aflav, p_lh] + w_hl * V_now[tya_idx, hi_af, lo_as, lo_aflav, p_hl] + w_hh * V_now[tya_idx, hi_af, lo_as, lo_aflav, p_hh]
+    v_sfs = w_ll * V_now[tya_idx, hi_af, lo_as, hi_aflav, p_ll] + w_lh * V_now[tya_idx, hi_af, lo_as, hi_aflav, p_lh] + w_hl * V_now[tya_idx, hi_af, lo_as, hi_aflav, p_hl] + w_hh * V_now[tya_idx, hi_af, lo_as, hi_aflav, p_hh]
+    v_ssf = w_ll * V_now[tya_idx, hi_af, hi_as, lo_aflav, p_ll] + w_lh * V_now[tya_idx, hi_af, hi_as, lo_aflav, p_lh] + w_hl * V_now[tya_idx, hi_af, hi_as, lo_aflav, p_hl] + w_hh * V_now[tya_idx, hi_af, hi_as, lo_aflav, p_hh]
+    v_sss = w_ll * V_now[tya_idx, hi_af, hi_as, hi_aflav, p_ll] + w_lh * V_now[tya_idx, hi_af, hi_as, hi_aflav, p_lh] + w_hl * V_now[tya_idx, hi_af, hi_as, hi_aflav, p_hl] + w_hh * V_now[tya_idx, hi_af, hi_as, hi_aflav, p_hh]
+
+    # Trilinear interpolation over addiction
+    v_interp = w_fff * v_fff + w_ffs * v_ffs + w_fsf * v_fsf + w_fss * v_fss + w_sff * v_sff + w_sfs * v_sfs + w_ssf * v_ssf + w_sss * v_sss
+
+    return v_interp
+end
+
+
+# --- Choice Probabilities and Welfare at Observed States ---
 
 """
 Compute choice probabilities and welfare at all observed states under a single
@@ -273,8 +355,8 @@ function aggregate_simulation(
 
         for h in 1:N_HH
             for d in 1:N_draws
-                j   = sim_choices[h, t, d]   # chosen alternative index
-                cat = cat_idx[j]              # product category
+                j   = sim_choices[h, t, d]   # chosen alternative index 
+                cat = cat_idx[j]              # product category 
                 cat_counts[cat + 1] += 1.0
 
                 total_addiction   += sim_addiction[h, t, d]
@@ -439,7 +521,7 @@ function aggregate_simulation_by_type_k3(
     function _aggregate_subgroup(hh_indices)
 
         N_sub = length(hh_indices)
-        # max(..., 1) guards against division by zero when a type has no households
+        # max(..., 1) avoids division by zero when a type has no households
         N_total = max(N_sub * N_draws, 1)
 
         results = DataFrame(
@@ -477,8 +559,8 @@ function aggregate_simulation_by_type_k3(
 
             for h in hh_indices
                 for d in 1:N_draws
-                    j   = sim_choices[h, t, d]   # chosen alternative index
-                    cat = cat_idx[j]              # product category
+                    j   = sim_choices[h, t, d]   # chosen alternative index 
+                    cat = cat_idx[j]              # product category 
                     cat_counts[cat + 1] += 1.0
 
                     total_addiction   += sim_addiction[h, t, d]
@@ -551,7 +633,7 @@ function aggregate_simulation_by_tya_type_k3(
     function _aggregate_subgroup(hh_indices)
 
         N_sub = length(hh_indices)
-        # max(..., 1) guards against division by zero when a type has no households
+        # max(..., 1) avoids division by zero when a type has no households
         N_total = max(N_sub * N_draws, 1)
 
         results = DataFrame(
@@ -589,8 +671,8 @@ function aggregate_simulation_by_tya_type_k3(
 
             for h in hh_indices
                 for d in 1:N_draws
-                    j   = sim_choices[h, t, d]   # chosen alternative index
-                    cat = cat_idx[j]              # product category
+                    j   = sim_choices[h, t, d]   # chosen alternative index 
+                    cat = cat_idx[j]              # product category 
                     cat_counts[cat + 1] += 1.0
 
                     total_addiction   += sim_addiction[h, t, d]
@@ -873,7 +955,7 @@ function aggregate_extensive_margin_by_tya(
     function _compute_subgroup(hh_indices)
 
         N_sub   = length(hh_indices)
-        # max(..., 1) guards against division by zero when there are no non-users
+        # max(..., 1) avoids division by zero when there are no non-users
         N_paths = max(N_sub * N_draws, 1)
 
         sq_cumulative = zeros(Float64, T_sim)
@@ -950,7 +1032,7 @@ function aggregate_extensive_margin_by_type_k3(
     function _compute_subgroup(hh_indices)
 
         N_sub   = length(hh_indices)
-        # max(..., 1) guards against division by zero when a type has no non-users
+        # max(..., 1) avoids division by zero when a type has no non-users
         N_paths = max(N_sub * N_draws, 1)
 
         sq_cumulative = zeros(Float64, T_sim)
@@ -1022,7 +1104,7 @@ function aggregate_extensive_margin_by_tya_type_k3(
     non_user_mask = hh_aflav0 .< aflav_threshold
 
     # Restrict to TYA-present households, then assign modal type via argmax of
-    # posterior probabilities, among non-users at baseline.
+    # posterior probabilities, among non-users at baseline. 
     idx_tya_type1 = findall(h -> hh_tya_terminal[h] == 2 && hh_posterior_type1[h] >= hh_posterior_type2[h] && hh_posterior_type1[h] >= hh_posterior_type3[h] && non_user_mask[h], 1:N_HH)
     idx_tya_type2 = findall(h -> hh_tya_terminal[h] == 2 && hh_posterior_type2[h] >  hh_posterior_type1[h] && hh_posterior_type2[h] >= hh_posterior_type3[h] && non_user_mask[h], 1:N_HH)
     idx_tya_type3 = findall(h -> hh_tya_terminal[h] == 2 && hh_posterior_type3[h] >  hh_posterior_type1[h] && hh_posterior_type3[h] >  hh_posterior_type2[h] && non_user_mask[h], 1:N_HH)
@@ -1030,7 +1112,7 @@ function aggregate_extensive_margin_by_tya_type_k3(
     function _compute_subgroup(hh_indices)
 
         N_sub   = length(hh_indices)
-        # max(..., 1) guards against division by zero when a type has no non-users
+        # max(..., 1) avoids division by zero when a type has no non-users
         N_paths = max(N_sub * N_draws, 1)
 
         sq_cumulative = zeros(Float64, T_sim)

@@ -162,18 +162,6 @@ setnames(T_wide, old = c("1", "2"), new = c("cig", "ecig"))
 # Write results to a file
 #############################
 
-# Write correlated shocks (L * z) to Data_Holdout/
-file_name <- "./Data_Holdout/Halton_Draw_Shocks.csv"
-fwrite(data.table(E), file_name)
-
-if (file.exists(file_name))
-{
-  cat("Results have been written to\n", file_name, "\n")
-} else
-{
-  cat("Error: File could not be written\n")
-}
-
 # Write predicted next period prices to Data_Holdout/
 file_name <- "./Data_Holdout/Halton_Draw_Transitions.csv"
 fwrite(T_wide, file_name)

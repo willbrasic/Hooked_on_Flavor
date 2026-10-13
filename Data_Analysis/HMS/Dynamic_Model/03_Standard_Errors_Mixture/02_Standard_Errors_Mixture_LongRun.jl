@@ -32,21 +32,21 @@ BETA = parse(Float64, get(ENV, "BETA", "1.0"))
 β   = BETA
 
 # Fixed flavored habit decay rate ψ_3 
-PSI_3 = parse(Float64, get(ENV, "PSI_3", "0.75"))
+PSI_3 = parse(Float64, get(ENV, "PSI_3", "0.50"))
 
 # Whether ψ_3 was estimated jointly 
-ESTIMATE_PSI_3 = parse(Bool, get(ENV, "ESTIMATE_PSI_3", "false"))
+ESTIMATE_PSI_3 = true   # ψ_3 is always estimated jointly as parameter 28
 
-# Enable warm-start VFI: reuse the previous evaluation's converged V as the
-# initial guess. The small θ perturbations (h ~ 1e-3) mean the previous V is
-# an excellent starting point, reducing VFI iterations for each perturbation.
+# Warm-start VFI: reuse the previous evaluation's converged V as the initial
+# guess. The θ perturbations are small (h ~ 1e-3), so the previous V is close
+# to the new solution and each perturbation needs fewer VFI iterations.
 WARM_START = true
 
-# Tighten VFI convergence tolerance for SE computation relative to actual estimation
+# VFI convergence tolerance, tighter than the one used in estimation
 VFI_TOL = 1e-6
 
 # Load all functions and packages from the functions file
-include("01_Functions_Mixture.jl")
+include("../02_Second_Stage_Estimation_Mixture_LongRun/01_Functions_Mixture.jl")
 using LinearAlgebra
 
 # Detect whether I am running on the HPC (any non-Windows system)
@@ -63,7 +63,6 @@ last_ra_phase_est = (1, 1)
 # Construct psi and beta tags for output directory and file naming.
 psi_tag = "Psi2_09_Psi1_01"
 beta_tag = "Beta_$(numeric_tag(BETA))"
-psi_3_tag = ESTIMATE_PSI_3 ? "Psi3_Est" : "Psi3_$(numeric_tag(PSI_3))"
 
 
 #############################
@@ -74,7 +73,7 @@ psi_3_tag = ESTIMATE_PSI_3 ? "Psi3_Est" : "Psi3_$(numeric_tag(PSI_3))"
 if HPC
 
     # Output path for results 
-    output_dir = abspath("./Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results")
+    output_dir = abspath(joinpath(@__DIR__, "../02_Second_Stage_Estimation_Mixture_LongRun/Dynamic_Model_Mixture_LongRun_$(psi_tag)_$(beta_tag)_Results"))
     mkpath(output_dir)
 
     # Set working directory to where the data CSVs live
@@ -82,14 +81,14 @@ if HPC
 else
 
     # Output path for results 
-    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results"
+    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Mixture_LongRun_$(psi_tag)_$(beta_tag)_Results"
     mkpath(output_dir)
 
     # Set working directory to where the data CSVs live
     cd("C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Data")
 end
 
-log_path = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_SE_Log.txt")
+log_path = joinpath(output_dir, "Dynamic_Model_Mixture_LongRun_$(psi_tag)_$(beta_tag)_SE_Log.txt")
 
 # Open log file for writing (log_io is defined as a global in 01_Functions.jl)
 log_io = open(log_path, "w")
@@ -106,7 +105,7 @@ log_msg("SE computation ($(psi_tag), $(beta_tag)) started at $(Dates.format(now(
 t_setup = time()
 
 # Load fixed parameters: only δ is taken from get_fixed_parameters();
-# ψ_1, ψ_2, and β are hardcoded above
+# ψ_1, ψ_2, and β are set above
 _, _, _, δ = get_fixed_parameters();
 
 # Get number of addiction states and normalized addiction grids for fast and slow stocks
@@ -119,7 +118,7 @@ _, N_J, J = get_product_choices();
 # Convert choice matrix J to choice vector y where y[i] = chosen alternative index for observation i
 y = get_hh_choices(J);
 
-# Get household identifiers (pre-loaded to avoid repeated CSV reads in objective)
+# Get household identifiers (loaded once so the objective does not re-read the CSV)
 hh_codes = get_hh_codes();
 
 # Pre-compute contiguous household index ranges for mixture log-likelihood
@@ -198,9 +197,8 @@ p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_t
 #############################
 
 # Map observed household prices to continuous values for likelihood interpolation
-# p_continuous is N × 2 (cig price, ecig price) - representative (median-across-bins) prices for VFI interpolation
-# P_obs_cig / P_obs_ecig are N × N_J matrices of actual bin-specific prices 
-_, p_continuous, P_obs_cig, P_obs_ecig = map_prices_to_grid(N_P, P, Pcomb, N_J);
+# p_continuous is N × 2 (cig price, ecig price): market prices for VFI interpolation
+_, p_continuous = map_prices_to_grid(N_P, P, Pcomb, N_J);
 
 
 #############################
@@ -244,8 +242,8 @@ log_msg("Observations: $(length(y))")
 #############################
 
 # Read θ_hat from the estimates file produced by 02_Estimation_Mixture.jl (in Estimates subdirectory)
-estimates_subdir = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates")
-estimates_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates.csv")
+estimates_subdir = joinpath(output_dir, "Dynamic_Model_Mixture_LongRun_$(psi_tag)_$(beta_tag)_Estimates")
+estimates_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_LongRun_$(psi_tag)_$(beta_tag)_Estimates.csv")
 df_est = CSV.read(estimates_path, DataFrame)
 
 # Drop the NLL column if present 
@@ -471,7 +469,7 @@ end
 #############################
 
 # Save _SE.csv with 2 rows: parameter names, standard errors
-se_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_SE.csv")
+se_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_LongRun_$(psi_tag)_$(beta_tag)_SE.csv")
 open(se_path, "w") do io
     println(io, join(param_names, ","))
     println(io, join([@sprintf("%.10f", se[k]) for k in 1:N_params], ","))
@@ -480,7 +478,7 @@ end
 log_msg("\nSEs saved to: $se_path")
 
 # Save full variance-covariance matrix (needed for delta method SEs for certain parameters)
-vcov_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_VCov.csv")
+vcov_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_LongRun_$(psi_tag)_$(beta_tag)_VCov.csv")
 vcov_df = DataFrame(V, param_names)
 CSV.write(vcov_path, vcov_df)
 log_msg("Variance-covariance matrix saved to: $vcov_path")
@@ -491,20 +489,20 @@ log_msg("Variance-covariance matrix saved to: $vcov_path")
 # Mixing Probabilities
 #############################
 
-# --- Why the delta method is needed here ---
+# --- Delta method for the mixing probabilities ---
 #
-# The optimizer estimates four mixing-weight parameters directly:
+# The optimizer estimates the four mixing-weight parameters directly:
 #   π_0_2, π_TYA_2, π_0_3, π_TYA_3
 #
-# But the economically meaningful quantities are the implied TYPE PROBABILITIES:
+# The quantities of interest are the implied type probabilities:
 #   P(Type 1 | s), P(Type 2 | s), P(Type 3 | s)
 # where s = household TYA share (fraction of months with TYA present).
 #
-# These probabilities are NONLINEAR functions of the estimated parameters
-# (they involve exp() and a denominator), so I cannot simply scale a standard
-# error. Instead, I apply the delta method: approximate the variance of a
-# nonlinear function g(θ) around the MLE θ_hat using a first-order Taylor
-# expansion,
+# These are nonlinear in the estimated parameters (exp() and a shared
+# denominator), so their SEs do not follow from the parameter SEs by
+# scaling. The delta method gives the variance of g(θ_hat) from a
+# first-order Taylor expansion around θ_hat:
+#
 #
 #   Var(g(θ_hat)) ≈ ∇g(θ_hat)' · V · ∇g(θ_hat)
 #   SE(g(θ_hat))  = sqrt(Var(g(θ_hat)))
@@ -526,9 +524,9 @@ log_msg("Variance-covariance matrix saved to: $vcov_path")
 #
 
 # Locate the four mixing parameters in the θ vector.
-# Their positions depend on whether ψ_3 was estimated as a 27th parameter:
-#   ESTIMATE_PSI_3=true  (27 params): [..., π_0_2(23), π_TYA_2(24), π_0_3(25), π_TYA_3(26), ψ_3(27)]
-#   ESTIMATE_PSI_3=false (26 params): [..., π_0_2(23), π_TYA_2(24), π_0_3(25), π_TYA_3(26)]
+# Their positions depend on whether ψ_3 was estimated as a 28th parameter:
+#   ESTIMATE_PSI_3=true  (28 params): [..., π_0_2(24), π_TYA_2(25), π_0_3(26), π_TYA_3(27), ψ_3(28)]
+#   ESTIMATE_PSI_3=false (27 params): [..., π_0_2(24), π_TYA_2(25), π_0_3(26), π_TYA_3(27)]
 # In both cases the mixing params are the last 4 non-ψ_3 entries, so I index
 # from the end of the parameter vector, shifting by 1 when ψ_3 occupies slot N_params.
 idx_pi_0_2   = ESTIMATE_PSI_3 ? N_params - 4 : N_params - 3
@@ -562,7 +560,7 @@ function softmax3_se(l2, l3, idx2, idx3, x2, x3, V)
     # D = total number of parameters (length of θ, = size of the VCov matrix)
     D = size(V, 1)
 
-    # ALL BELOW GRADIENTS ARE DERIVED IN PAPER APPENDIX
+    # The gradients below are derived in the paper appendix
 
     # --- Gradient for Type 1: ∇p_1 ---
     # Type 1 is the base category with no logit of its own. Its probability falls
@@ -611,8 +609,8 @@ function softmax3_se(l2, l3, idx2, idx3, x2, x3, V)
     end
 
     # Apply the delta method: SE(p_k) = sqrt(∇p_k' · V · ∇p_k)
-    # dot(g, V*g) computes g'Vg as a matrix-vector product followed by a dot product.
-    # abs() guards against tiny negative values from numerical imprecision in H⁻¹.
+    # dot(g, V*g) is g'Vg.
+    # abs() handles tiny negative values from numerical error in H⁻¹.
     se1 = sqrt(abs(dot(g1, V * g1)))
     se2 = sqrt(abs(dot(g2, V * g2)))
     se3 = sqrt(abs(dot(g3, V * g3)))
@@ -665,12 +663,12 @@ log_msg(@sprintf("  P(Type 3 | TYA Always Present) = %.4f  (SE = %.4f)", p3_tya,
 # Units
 #############################
 
-# All structural parameters were estimated in STANDARDIZED units because
-# quantities and nicotine were divided by their sample maxima before entering
-# the objective. To report interpretable estimates and SEs, I rescale back to
-# original units using the same transformations applied during estimation.
+# The structural parameters were estimated in standardized units: quantities
+# and nicotine were divided by their sample maxima before entering the
+# objective. The estimates and SEs are rescaled back to original units here
+# with the same transformations used in estimation.
 #
-# There are three groups, depending on what type of rescaling is required:
+# Three groups, by the rescaling required:
 #
 # -----------------------------------------------------------------------
 # GROUP 1 - Divide by a fixed data constant (q_max, n_max)
@@ -682,29 +680,30 @@ log_msg(@sprintf("  P(Type 3 | TYA Always Present) = %.4f  (SE = %.4f)", p3_tya,
 #
 #       α_C_orig  = α_C_std  / q_cig_max
 #       α_E_orig  = α_E_std  / q_ecig_max
+#       α_E2_orig = α_E2_std / q_ecig_max^2
 #       α_CE_orig = α_CE_std / q_bundle_max
 #       ω_C_orig  = ω_C_std  / q_cig_max
 #       ω_E_orig  = ω_E_std  / q_ecig_max
 #       γ_1_orig  = γ_1_std  / n_max
 #
-#   Because q_max and n_max are FIXED DATA CONSTANTS (not estimated), the SE
-#   transforms by the same factor:
+#   q_max and n_max are data constants, not estimates, so the SE scales by
+#   the same factor:
 #
 #       SE(α_C_orig) = SE(α_C_std) / q_cig_max
 #
-#   No delta method is needed for Group 1 - scaling by a constant is linear.
+#   No delta method is needed here: scaling by a constant is linear.
 #
 # -----------------------------------------------------------------------
 # GROUP 2 - Multiply by estimated ψ_3 (requires the delta method)
 # -----------------------------------------------------------------------
 #
-#   THIS IS FULLY EXPLAINED IN PAPER APPENDIX
+#   See the paper appendix for the full derivation.
 #
-#   WHY THE DELTA METHOD IS NEEDED:
-#   When ψ_3 is estimated jointly (ESTIMATE_PSI_3=true), γ_k_orig is a
-#   PRODUCT of two estimated quantities. The SE of a product is not simply
-#   the product of the individual SEs as I must account for (a) the variance
-#   in γ_k, (b) the variance in ψ_3, and (c) the covariance between them.
+#   When ψ_3 is estimated jointly (ESTIMATE_PSI_3=true), γ_k_orig is the
+#   product of two estimated quantities. Its variance depends on (a) the
+#   variance of γ_k, (b) the variance of ψ_3, and (c) the covariance
+#   between them, so the delta method is used.
+#
 #
 #   DERIVATION:
 #   Let f(γ, ψ) = γ · ψ / C  where C = n_flav_max (a data constant).
@@ -732,7 +731,7 @@ log_msg(@sprintf("  P(Type 3 | TYA Always Present) = %.4f  (SE = %.4f)", p3_tya,
 # GROUP 3 - No rescaling needed
 # -----------------------------------------------------------------------
 #
-#   λ_1–λ_4 multiply binary (0/1) flavor indicators - no standardization.
+#   λ_1 to λ_4 multiply binary (0/1) flavor indicators, no standardization.
 #   ξ_{kC}, ξ_{kE}, ξ_{kCE} are additive category fixed effects - no standardization.
 #   π_0_2, π_TYA_2, π_0_3, π_TYA_3 enter the softmax directly - no standardization.
 #   ψ_3 is a decay rate in (0,1) - no standardization.
@@ -748,10 +747,11 @@ log_msg("")
 log_msg("Group 1 - divide by data constant (SE scales identically):")
 log_msg(@sprintf("  α_C_orig  = α_C  / q_cig_max    = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[1],  q_cig_max,    θ_hat[1]/q_cig_max,    se[1]/q_cig_max))
 log_msg(@sprintf("  α_E_orig  = α_E  / q_ecig_max   = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[2],  q_ecig_max,   θ_hat[2]/q_ecig_max,   se[2]/q_ecig_max))
-log_msg(@sprintf("  α_CE_orig = α_CE / q_bundle_max = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[3],  q_bundle_max, θ_hat[3]/q_bundle_max, se[3]/q_bundle_max))
-log_msg(@sprintf("  ω_C_orig  = ω_C  / q_cig_max    = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[12], q_cig_max,    θ_hat[12]/q_cig_max,   se[12]/q_cig_max))
-log_msg(@sprintf("  ω_E_orig  = ω_E  / q_ecig_max   = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[13], q_ecig_max,   θ_hat[13]/q_ecig_max,  se[13]/q_ecig_max))
-log_msg(@sprintf("  γ_1_orig  = γ_1  / n_max        = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[8],  n_max,        θ_hat[8]/n_max,        se[8]/n_max))
+log_msg(@sprintf("  α_E2_orig = α_E2 / q_ecig_max²  = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[3],  q_ecig_max^2, θ_hat[3]/q_ecig_max^2, se[3]/q_ecig_max^2))
+log_msg(@sprintf("  α_CE_orig = α_CE / q_bundle_max = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[4],  q_bundle_max, θ_hat[4]/q_bundle_max, se[4]/q_bundle_max))
+log_msg(@sprintf("  ω_C_orig  = ω_C  / q_cig_max    = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[13], q_cig_max,    θ_hat[13]/q_cig_max,   se[13]/q_cig_max))
+log_msg(@sprintf("  ω_E_orig  = ω_E  / q_ecig_max   = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[14], q_ecig_max,   θ_hat[14]/q_ecig_max,  se[14]/q_ecig_max))
+log_msg(@sprintf("  γ_1_orig  = γ_1  / n_max        = %.10f / %.1f = %.10f   SE = %.10f", θ_hat[9],  n_max,        θ_hat[9]/n_max,        se[9]/n_max))
 
 # --- Group 2: multiply by ψ_3 ---
 log_msg("")
@@ -763,8 +763,8 @@ if ESTIMATE_PSI_3
     idx_psi_3 = N_params         # ψ_3 is the last parameter in θ     
     ψ_3_hat   = θ_hat[idx_psi_3] # point estimate of ψ_3
 
-    # Loop over γ_2 (pos 9), γ_3 (pos 10), γ_4 (pos 11)
-    for (name, idx) in [("γ_2", 9), ("γ_3", 10), ("γ_4", 11)]
+    # Loop over γ_2 (pos 10), γ_3 (pos 11), γ_4 (pos 12)
+    for (name, idx) in [("γ_2", 10), ("γ_3", 11), ("γ_4", 12)]
 
         g = θ_hat[idx]     # point estimate of γ_k (standardized)
         p = ψ_3_hat        # point estimate of ψ_3
@@ -778,7 +778,7 @@ if ESTIMATE_PSI_3
         # V[idx, idx_psi_3]     = Cov(γ_k, ψ_3) from the VCov matrix
         var_prod = p^2 * V[idx, idx] + g^2 * V[idx_psi_3, idx_psi_3] + 2 * g * p * V[idx, idx_psi_3]
 
-        # SE = sqrt(Var) / C - abs() guards against tiny negative variance from numerical noise
+        # SE = sqrt(Var) / C; abs() handles tiny negative variance from numerical noise
         se_orig = sqrt(abs(var_prod)) / n_flav_max
 
         log_msg(@sprintf("  %s_orig = %s × ψ_3 / n_flav_max = %.10f × %.10f / %.4f = %.10f   SE(delta) = %.10f", name, name, g, p, n_flav_max, orig, se_orig))
@@ -788,7 +788,7 @@ else
 
     # ψ_3 is a fixed constant (not estimated), so γ_k_orig = γ_k · PSI_3 / C
     # is linear in γ_k → SE scales by the same constant, no delta method needed.
-    for (name, idx) in [("γ_2", 9), ("γ_3", 10), ("γ_4", 11)]
+    for (name, idx) in [("γ_2", 10), ("γ_3", 11), ("γ_4", 12)]
         orig    = θ_hat[idx] * PSI_3 / n_flav_max    # point estimate in original units
         se_orig = se[idx]    * PSI_3 / n_flav_max    # SE scales linearly
         log_msg(@sprintf("  %s_orig = %s × ψ_3 / n_flav_max = %.10f × %.4f / %.4f = %.10f   SE = %.10f  (ψ_3 fixed, no delta method needed)", name, name, θ_hat[idx], PSI_3, n_flav_max, orig, se_orig))

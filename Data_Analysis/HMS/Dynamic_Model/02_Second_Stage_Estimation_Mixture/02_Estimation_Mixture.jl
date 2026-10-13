@@ -21,15 +21,13 @@
 #############################
 
 # Flavored habit decay rate ψ_3
-# If ESTIMATE_PSI_3=true, ψ_3 is added to the parameter vector and estimated jointly.
-# If false (default), ψ_3 is fixed at PSI_3 (read from ENV, default 0.75).
-ESTIMATE_PSI_3 = parse(Bool, get(ENV, "ESTIMATE_PSI_3", "false"))
-PSI_3 = parse(Float64, get(ENV, "PSI_3", "0.75"))
+# ψ_3 is always estimated jointly as the 28th parameter. PSI_3 only seeds the flavored habit grid and starting objects.
+PSI_3 = parse(Float64, get(ENV, "PSI_3", "0.50"))
 
 # Discount factor β (read from ENV, default 1.0)
 BETA = parse(Float64, get(ENV, "BETA", "1.0"))
 
-# Hardcoded fixed parameters
+# Fixed parameters
 ψ_1 = 0.10
 ψ_2 = 0.90
 β   = BETA
@@ -51,16 +49,15 @@ date_str = Dates.format(today(), "yyyy-mm-dd")
 job_id = get(ENV, "SLURM_JOB_ID", Dates.format(now(), "HHMMSS"))
 run_id = "$(date_str)_$(job_id)"
 
-# Construct psi, beta, and psi_3 tags for output directory and file naming
+# Construct psi and beta tags for output directory and file naming
 psi_tag   = "Psi2_09_Psi1_01"
 beta_tag  = "Beta_$(numeric_tag(BETA))"
-psi_3_tag = ESTIMATE_PSI_3 ? "Psi3_Est" : "Psi3_$(numeric_tag(PSI_3))"
 
 # File paths if on HPC or not
 if HPC
 
     # Output path for results
-    output_dir = abspath(joinpath(@__DIR__, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results"))
+    output_dir = abspath(joinpath(@__DIR__, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Results"))
     mkpath(output_dir)
 
     # Set working directory to where the data CSVs live
@@ -68,7 +65,7 @@ if HPC
 else
 
     # Output path for results (local Windows path)
-    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Results"
+    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Results"
     mkpath(output_dir)
 
     # Set working directory to where the data CSVs live
@@ -77,25 +74,25 @@ end
 
 # Create subdirectories for log, outer try, inner try, and estimates files.
 # Folder names match file naming convention.
-log_dir          = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Log")
-outer_try_dir    = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Outer_Try_Params")
-inner_try_dir    = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Inner_Try_Params")
-estimates_subdir = joinpath(output_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates")
+log_dir          = joinpath(output_dir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Log")
+outer_try_dir    = joinpath(output_dir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Outer_Try_Params")
+inner_try_dir    = joinpath(output_dir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Inner_Try_Params")
+estimates_subdir = joinpath(output_dir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Estimates")
 mkpath(log_dir)
 mkpath(outer_try_dir)
 mkpath(inner_try_dir)
 mkpath(estimates_subdir)
 
 # Per-run output file paths (all go in subdirectories)
-log_path       = joinpath(log_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Log_$(run_id).txt")
-outer_try_path = joinpath(outer_try_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Outer_Try_Params_$(run_id).csv")
-inner_try_path = joinpath(inner_try_dir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Inner_Try_Params_$(run_id).csv")
+log_path       = joinpath(log_dir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Log_$(run_id).txt")
+outer_try_path = joinpath(outer_try_dir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Outer_Try_Params_$(run_id).csv")
+inner_try_path = joinpath(inner_try_dir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Inner_Try_Params_$(run_id).csv")
 
 # Open log file for writing (log_io is defined as a global in 01_Functions.jl)
 log_io = open(log_path, "w")
 
 # Print and log the start time and number of Julia threads available for VFI parallelization
-log_msg("Dynamic estimation ($(psi_tag), $(beta_tag), $(psi_3_tag)) started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
+log_msg("Dynamic estimation ($(psi_tag), $(beta_tag)) started at $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
 log_msg("")
 log_msg("Number of threads: $(Threads.nthreads())")
 log_msg("")
@@ -112,7 +109,7 @@ hh_ranges = precompute_hh_ranges(hh_codes);
 #############################
 
 # Load fixed parameters: only δ is taken from get_fixed_parameters();
-# ψ_1, ψ_2, and β are hardcoded above
+# ψ_1, ψ_2, and β are set above
 _, _, _, δ = get_fixed_parameters();
 
 
@@ -205,9 +202,8 @@ p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_t
 #############################
 
 # Map observed household prices to continuous values for likelihood interpolation
-# p_continuous is N × 2 (cig price, ecig price): representative (median-across-bins) prices for VFI interpolation
-# P_obs_cig / P_obs_ecig are N × N_J matrices of actual bin-specific prices 
-_, p_continuous, P_obs_cig, P_obs_ecig = map_prices_to_grid(N_P, P, Pcomb, N_J);
+# p_continuous is N × 2 (cig price, ecig price): market prices for VFI interpolation
+_, p_continuous = map_prices_to_grid(N_P, P, Pcomb, N_J);
 
 
 #############################
@@ -230,9 +226,8 @@ n_flav     = Float64.(is_flavored)             # ∈ {0.0, 1.0}
 n_flav_max = 1.0                               # binary max; rescale γ_2, γ_3, γ_4 by × ψ_3
 N_A_flav, A_flav = get_addiction_space(PSI_3; N_A=10)
 
-# When ψ_3 is fixed, pre-compute transitions and trajectories once.
-# When ψ_3 is estimated, these are recomputed inside the objective function
-# at each candidate ψ_3 value, so I only set initial values here.
+# These are recomputed inside the objective at each candidate ψ_3; the values
+# here only initialize the globals.
 aflav_lower_current, aflav_upper_current, aflav_weight_current = precompute_addiction_transitions(N_J, N_A_flav, PSI_3, A_flav, n_flav)
 aflav0_current, _ = get_initial_addiction_stock(PSI_3, A_flav, n_flav, y, hh_codes)
 aflav_continuous_current = simulate_addiction_trajectories(N_A_flav, PSI_3, A_flav, n_flav, y, hh_codes, aflav0_current)
@@ -245,84 +240,54 @@ aflav_continuous_current = simulate_addiction_trajectories(N_A_flav, PSI_3, A_fl
 # Print and log standardization factors (needed to rescale parameter estimates)
 log_msg("Standardization factors (divide estimates by these to get original units):")
 log_msg("")
-log_msg(rpad("  q_cig_max    = $q_cig_max (packs)",        44) * "— standardizes q_cig; rescale α_C, ω_C by ÷ q_cig_max")
-log_msg(rpad("  q_ecig_max   = $q_ecig_max (mL)",          44) * "— standardizes q_ecig; rescale α_E, ω_E by ÷ q_ecig_max")
-log_msg(rpad("  q_bundle_max = $q_bundle_max (packs × mL)", 44) * "— standardizes q_bundle; rescale α_CE by ÷ q_bundle_max")
-log_msg(rpad("  n_max        = $n_max (mg)",                44) * "— standardizes nicotine; rescale γ_1 by ÷ n_max")
-log_msg(rpad("  n_flav_max   = $n_flav_max (mL)",           44) * "— max flavored ecig quantity; rescale γ_2, γ_3, γ_4 by × ψ_3 ÷ n_flav_max")
+log_msg(rpad("  q_cig_max    = $q_cig_max (packs)",        44) * ": standardizes q_cig; rescale α_C, ω_C by ÷ q_cig_max")
+log_msg(rpad("  q_ecig_max   = $q_ecig_max (mL)",          44) * ": standardizes q_ecig; rescale α_E, ω_E by ÷ q_ecig_max")
+log_msg(rpad("  q_bundle_max = $q_bundle_max (packs × mL)", 44) * ": standardizes q_bundle; rescale α_CE by ÷ q_bundle_max")
+log_msg(rpad("  n_max        = $n_max (mg)",                44) * ": standardizes nicotine; rescale γ_1 by ÷ n_max")
+log_msg(rpad("  n_flav_max   = $n_flav_max (mL)",           44) * ": max flavored ecig quantity; rescale γ_2, γ_3, γ_4 by × ψ_3 ÷ n_flav_max")
 log_msg("  A_f_max      = $(maximum(A_f)) (fast addiction grid max, normalized to [0, 1])")
 log_msg("  A_s_max      = $(maximum(A_s)) (slow addiction grid max, normalized to [0, 1])")
 log_msg("  A_flav_max   = $(maximum(A_flav)) (flavored habit grid max, normalized to [0, 1])")
-log_msg("  PSI_3        = $PSI_3 (flavored habit decay rate, $(ESTIMATE_PSI_3 ? "ESTIMATED" : "fixed"))")
-log_msg("  ESTIMATE_PSI_3 = $ESTIMATE_PSI_3")
+log_msg("  PSI_3        = $PSI_3 (flavored habit decay rate used to build the grid; ψ_3 itself is estimated as parameter 28)")
 
 # Standardized starting values
-# When ESTIMATE_PSI_3=true, ψ_3 is appended as the last parameter 
-if ESTIMATE_PSI_3
-    starting_param = (
-        α_C     =   1.7539962989,
-        α_E     =   2.6528275992,
-        α_CE    =  -0.5793447834,
-        λ_1     =   0.1458019323,  
-        λ_2     =   0.2106063714,  
-        λ_3     =  -0.0456078917,
-        λ_4     =  -0.4563471644,
-        γ_1     = -12.3435966720,
-        γ_2     = -11.9087621394, 
-        γ_3     =  -2.4146527666,  
-        γ_4     =  -0.5518799376,  
-        ω_C     =  -0.30,
-        ω_E     =  -1.10,
-        ξ_C_1   =  -2.8416876225,
-        ξ_E_1   =  -9.3446139588,
-        ξ_CE_1  =  -7.2523098636,
-        ξ_C_2   =  -4.8294614255,
-        ξ_E_2   =  -3.8008342716,
-        ξ_CE_2  =  -4.1974220102,
-        ξ_C_3   = -15.0000,        
-        ξ_E_3   = -15.0000,
-        ξ_CE_3  = -15.0000,
-        π_0_2   =  -0.69,         
-        π_TYA_2 =   0.50,         
-        π_0_3   =   2.14,          
-        π_TYA_3 =  -0.25,          
-        ψ_3     =   0.75           
-    )
-else
-    starting_param = (
-        α_C     =   1.7539962989,
-        α_E     =   2.6528275992,
-        α_CE    =  -0.5793447834,
-        λ_1     =   0.1458019323, 
-        λ_2     =   0.2106063714,  
-        λ_3     =  -0.0456078917,
-        λ_4     =  -0.4563471644,
-        γ_1     = -12.3435966720,
-        γ_2     = -11.9087621394,  
-        γ_3     =  -2.4146527666,  
-        γ_4     =  -0.5518799376, 
-        ω_C     =  -0.30,
-        ω_E     =  -1.10,
-        ξ_C_1   =  -2.8416876225,
-        ξ_E_1   =  -9.3446139588,
-        ξ_CE_1  =  -7.2523098636,
-        ξ_C_2   =  -4.8294614255,
-        ξ_E_2   =  -3.8008342716,
-        ξ_CE_2  =  -4.1974220102,
-        ξ_C_3   = -15.0000,        
-        ξ_E_3   = -15.0000,
-        ξ_CE_3  = -15.0000,
-        π_0_2   =  -0.69,          
-        π_TYA_2 =   0.50,       
-        π_0_3   =   2.14,         
-        π_TYA_3 =  -0.25          
-    )
-end
+# ψ_3 is the last (28th) parameter
+starting_param = (
+    α_C     =    2.02,
+    α_E     =    3.25,
+    α_E2    =   -3.00,
+    α_CE    =   -0.63,
+    λ_1     =    0.20,
+    λ_2     =    0.18,
+    λ_3     =   -0.05,
+    λ_4     =   -0.44,
+    γ_1     =  -18.41,
+    γ_2     =   -8.59,
+    γ_3     =   -1.46,
+    γ_4     =   -1.00,
+    ω_C     =   -0.15,
+    ω_E     =   -0.54,
+    ξ_C_1   =   -2.84,
+    ξ_E_1   =  -10.54,
+    ξ_CE_1  =   -7.41,
+    ξ_C_2   =   -4.16,
+    ξ_E_2   =   -4.36,
+    ξ_CE_2  =   -4.51,
+    ξ_C_3   =   -7.93,
+    ξ_E_3   =  -19.00,
+    ξ_CE_3  =  -16.98,
+    π_0_2   =   -0.67,
+    π_TYA_2 =    0.52,
+    π_0_3   =    2.52,
+    π_TYA_3 =   -0.29,
+    ψ_3     =    0.47
+)
 
 # Initial simplex deviations for Nelder-Mead
 add = [
     abs(starting_param.α_C)     * 0.50,  
     abs(starting_param.α_E)     * 0.50,   
+    abs(starting_param.α_E2)    * 0.50,
     abs(starting_param.α_CE)    * 0.50,   
     abs(starting_param.λ_1)     * 0.50,   
     abs(starting_param.λ_2)     * 0.50,  
@@ -348,9 +313,7 @@ add = [
     abs(starting_param.π_0_3)   * 0.50,   
     abs(starting_param.π_TYA_3) * 0.50   
 ]
-if ESTIMATE_PSI_3
-    push!(add, 0.20)                     
-end
+push!(add, 0.20)   # ψ_3
 
 # Optimizer settings for random_amoeba multi-start Nelder-Mead
 L          = 20    # Number of random restarts (outer tries)
@@ -403,7 +366,7 @@ for (i, val) in enumerate(values(opt_param))
 end
 
 # Save estimated parameters to _Estimates.csv 
-estimates_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Estimates.csv")
+estimates_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Estimates.csv")
 open(estimates_path, "w") do io
     println(io, join(replace.(collect(String, string.(keys(opt_param))),
         "α" => "alpha", "λ" => "lambda", "γ" => "gamma",
@@ -432,15 +395,15 @@ ll_val = -nll_val
 aic_val = 2.0 * nll_val + 2.0 * N_params
 bic_val = 2.0 * nll_val + N_params * log(N_hh)
 
-stats_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_Statistics.csv")
+stats_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_Statistics.csv")
 open(stats_path, "w") do io
     println(io, "LL,AIC,BIC")
     println(io, join([@sprintf("%.10f", v) for v in [ll_val, aic_val, bic_val]], ","))
 end
 log_msg("Statistics saved to: $stats_path")
 
-# Re-solve VFI at ̂θ_hat to obtain V_decision for per-household log-likelihood decomposition.
-# This mirrors the objective function's parameter extraction and VFI calls exactly.
+# Re-solve VFI at θ̂ to get V_decision for the per-household log-likelihoods.
+# Same parameter extraction and VFI calls as in the objective function.
 log_msg("")
 log_msg("===================================")
 log_msg("Re-solving VFI at θ̂ for per-HH LL")
@@ -450,25 +413,23 @@ log_msg("===================================")
 θ_hat_vec = collect(Float64, values(opt_param))
 
 # Extract parameters
-common_post  = θ_hat_vec[1:13]
-type_1_post  = θ_hat_vec[14:16]
-type_2_post  = θ_hat_vec[17:19]
-type_3_post  = θ_hat_vec[20:22]
-π_0_2_post   = θ_hat_vec[23]
-π_TYA_2_post = θ_hat_vec[24]
-π_0_3_post   = θ_hat_vec[25]
-π_TYA_3_post = θ_hat_vec[26]
+common_post  = θ_hat_vec[1:14]
+type_1_post  = θ_hat_vec[15:17]
+type_2_post  = θ_hat_vec[18:20]
+type_3_post  = θ_hat_vec[21:23]
+π_0_2_post   = θ_hat_vec[24]
+π_TYA_2_post = θ_hat_vec[25]
+π_0_3_post   = θ_hat_vec[26]
+π_TYA_3_post = θ_hat_vec[27]
 
-# When ψ_3 was estimated, the pre-computed flavored addiction objects use ENV PSI_3, which
-# may differ from the estimated ψ_3 = θ_hat_vec[27]. Recompute at the estimated value.
-if ESTIMATE_PSI_3
-    ψ_3_post = θ_hat_vec[27]
-    N_A_flav, A_flav = get_addiction_space(ψ_3_post; N_A=10)
-    aflav_lower_current, aflav_upper_current, aflav_weight_current = precompute_addiction_transitions(N_J, N_A_flav, ψ_3_post, A_flav, n_flav)
-    aflav0_current, _ = get_initial_addiction_stock(ψ_3_post, A_flav, n_flav, y, hh_codes)
-    aflav_continuous_current = simulate_addiction_trajectories(N_A_flav, ψ_3_post, A_flav, n_flav, y, hh_codes, aflav0_current)
-    log_msg("Recomputed flavored addiction objects at estimated ψ_3 = $ψ_3_post for per-HH LL re-solve")
-end
+# The pre-computed flavored addiction objects use ENV PSI_3, which differs from the
+# estimated ψ_3 = θ_hat_vec[28]. Recompute at the estimated value.
+ψ_3_post = θ_hat_vec[28]
+N_A_flav, A_flav = get_addiction_space(ψ_3_post; N_A=10)
+aflav_lower_current, aflav_upper_current, aflav_weight_current = precompute_addiction_transitions(N_J, N_A_flav, ψ_3_post, A_flav, n_flav)
+aflav0_current, _ = get_initial_addiction_stock(ψ_3_post, A_flav, n_flav, y, hh_codes)
+aflav_continuous_current = simulate_addiction_trajectories(N_A_flav, ψ_3_post, A_flav, n_flav, y, hh_codes, aflav0_current)
+log_msg("Recomputed flavored addiction objects at estimated ψ_3 = $ψ_3_post for per-HH LL re-solve")
 
 # Construct per-type structural parameter vectors 
 θ_struct_1_post = vcat(common_post, type_1_post)
@@ -533,8 +494,6 @@ log_msg("Post-estimation VFI: type1=$(vfi_iters_1_post) iters ($(vfi_converged_1
 
 # Compute per-household log-likelihood using mixture logsumexp
 hh_ll = Vector{Float64}(undef, N_hh)
-ω_C_post = opt_param.ω_C
-ω_E_post = opt_param.ω_E
 for h in 1:N_hh
     start_idx, stop_idx = hh_ranges[h]
 
@@ -556,10 +515,6 @@ for h in 1:N_hh
             aflav_continuous_current[i], p_continuous[i, 1], p_continuous[i, 2],
             N_J, N_P, A_f, A_s, A_flav, P
         )
-        for j in 1:N_J
-            v_interp_1[j] += ω_C_post * (P_obs_cig[i, j]  - p_continuous[i, 1]) * q_cig[j] +
-                              ω_E_post * (P_obs_ecig[i, j] - p_continuous[i, 2]) * q_ecig[j]
-        end
         log_ll_1 += v_interp_1[y[i]] - logsumexp(v_interp_1)
 
         v_interp_2 = interpolate_v_choice(
@@ -567,10 +522,6 @@ for h in 1:N_hh
             aflav_continuous_current[i], p_continuous[i, 1], p_continuous[i, 2],
             N_J, N_P, A_f, A_s, A_flav, P
         )
-        for j in 1:N_J
-            v_interp_2[j] += ω_C_post * (P_obs_cig[i, j]  - p_continuous[i, 1]) * q_cig[j] +
-                              ω_E_post * (P_obs_ecig[i, j] - p_continuous[i, 2]) * q_ecig[j]
-        end
         log_ll_2 += v_interp_2[y[i]] - logsumexp(v_interp_2)
 
         v_interp_3 = interpolate_v_choice(
@@ -578,10 +529,6 @@ for h in 1:N_hh
             aflav_continuous_current[i], p_continuous[i, 1], p_continuous[i, 2],
             N_J, N_P, A_f, A_s, A_flav, P
         )
-        for j in 1:N_J
-            v_interp_3[j] += ω_C_post * (P_obs_cig[i, j]  - p_continuous[i, 1]) * q_cig[j] +
-                              ω_E_post * (P_obs_ecig[i, j] - p_continuous[i, 2]) * q_ecig[j]
-        end
         log_ll_3 += v_interp_3[y[i]] - logsumexp(v_interp_3)
     end
 
@@ -590,7 +537,7 @@ for h in 1:N_hh
 end
 
 # Save _HH_LL.csv: household code and per-household log-likelihood
-hh_ll_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_V2_$(psi_tag)_$(beta_tag)_$(psi_3_tag)_HH_LL.csv")
+hh_ll_path = joinpath(estimates_subdir, "Dynamic_Model_Mixture_$(psi_tag)_$(beta_tag)_HH_LL.csv")
 open(hh_ll_path, "w") do io
     println(io, "hh_code,ll")
     for h in 1:N_hh
@@ -619,6 +566,7 @@ log_msg("Per-household LL saved to: $hh_ll_path")
 #
 #   α_C_orig  = α_C_std  / q_cig_max           → utils per pack
 #   α_E_orig  = α_E_std  / q_ecig_max          → utils per mL
+#   α_E2_orig = α_E2_std / q_ecig_max^2        → utils per mL²
 #   α_CE_orig = α_CE_std / q_bundle_max        → utils per (pack × mL)
 #   ω_C_orig  = ω_C_std  / q_cig_max           → utils per ($ × pack)
 #   ω_E_orig  = ω_E_std  / q_ecig_max          → utils per ($ × mL)
@@ -643,6 +591,7 @@ log_msg("Use these formulas to convert estimates to interpretable units:")
 log_msg("")
 log_msg("  α_C_orig  = α_C  / $q_cig_max")
 log_msg("  α_E_orig  = α_E  / $q_ecig_max")
+log_msg("  α_E2_orig = α_E2 / $(q_ecig_max^2)")
 log_msg("  α_CE_orig = α_CE / $q_bundle_max")
 log_msg("  ω_C_orig  = ω_C  / $q_cig_max                        (utils per dollar × pack)")
 log_msg("  ω_E_orig  = ω_E  / $q_ecig_max                       (utils per dollar × mL)")

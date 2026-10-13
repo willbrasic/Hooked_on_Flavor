@@ -33,7 +33,7 @@ options(max.print = 999999)
 # Increase the data table print limit
 options(datatable.print.nrows = 999)
 
-# Vector for years of data we are interested in 
+# Vector for years of data I am interested in
 years <- 2021:2023
 
 
@@ -298,8 +298,9 @@ list_households <- lapply(list_households, function(dt)
   dt
 })
 
-# Create column for if household is in a state with flavored e-cig bans 
-states_with_flavor_bans <- c(6, 25, 34, 36, 44, 49)
+# Create column for if household is in a state with a flavored e-cig ban in
+# force during 2021-2023: CA (Dec 2022), MA, NJ, NY, RI. Utah's ban began in 2025
+states_with_flavor_bans <- c(6, 25, 34, 36, 44)
 list_households <- lapply(list_households, function(dt) 
 {
   dt[, state_flavor_ban := fifelse(

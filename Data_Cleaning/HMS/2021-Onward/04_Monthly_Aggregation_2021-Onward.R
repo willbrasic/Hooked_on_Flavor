@@ -54,6 +54,14 @@ dt <- dt[, `:=` (quantity = NULL,
                  nicotine_mg_consumed_per_mL = NULL
                  )]
 
+# Nielsen panel years follow a weekly calendar, so the 2021 file runs through
+# Saturday 1 January 2022 and holds 228 trips dated that day. Assign any trip
+# dated after its panel year to the panel year's final month so the purchase
+# stays with the year the household was observed in (`purchase_year` here is
+# still the Nielsen panel year)
+dt[as.integer(format(purchase_month, "%Y")) > purchase_year,
+   purchase_month := as.IDate(paste0(purchase_year, "-12-01"))]
+
 # Aggregate data to the monthly household level
 start_col <- match("total_packs", names(dt))
 end_col <- match("ecig_nicotine_mg_absorbed", names(dt))
@@ -108,11 +116,21 @@ dt_monthly[, `:=` (original_ecig = fifelse(total_original_mL > 0, 1, 0),
 setcolorder(dt_monthly, c("original_ecig", "flavored_ecig", "fda_authorized_ecig",
                           "fda_flavored_ecig", "non_fda_flavored_ecig"), after = "ecig")
 
-# Household-year combinations that actually exist for a given household
-hh_years <- unique(dt_monthly[, .(household_code, purchase_year)])
+# Load in the full panelist roster (every household-year a household is in the
+# Nielsen panel, whether or not it bought tobacco that year)
+file_name <- paste0("../panelists_information_2021-Onward.rds")
+dt_roster <- readRDS(file_name)
 
-# Build a month grid only for those household-year pairs
-grid <- hh_years[, .(purchase_month = seq(as.IDate(paste0(purchase_year, "-01-01")), 
+# Household-year combinations for tobacco households: every year the household
+# is on the roster. Years with no tobacco purchase must be kept so initiation
+# and quits are observed. Every purchase month now falls inside a roster year
+# (see the panel-year adjustment above), so nothing is lost in the grid join
+hh_years <- unique(
+  dt_roster[household_code %in% unique(dt_monthly[, household_code]), .(household_code, purchase_year)]
+)
+
+# Build a month grid for those household-year pairs
+grid <- hh_years[, .(purchase_month = seq(as.IDate(paste0(purchase_year, "-01-01")),
                                           as.IDate(paste0(purchase_year, "-12-01")), 
                                           by = "1 month")), 
                  by = .(household_code, purchase_year)
@@ -239,10 +257,10 @@ dt_monthly[, `:=`(
 dt_monthly[, c("cig_tmp", "ecig_tmp") := NULL]
 setcolorder(dt_monthly, "cig_ecig", after = "ecig")
 
-# # Ensure categories are mutually exclusive
+# # Check that categories are mutually exclusive
 # dt_monthly[(cig + ecig + cig_ecig) > 1, .N]
 # 
-# # Ensure categories are free of NAs
+# # Check that categories have no NAs
 # dt_monthly[
 #   rowSums(
 #     cbind(cig, ecig, cig_ecig),
@@ -256,9 +274,12 @@ setcolorder(dt_monthly, "cig_ecig", after = "ecig")
 # to get real prices
 #############################
 
-# Get tobacco cpi data from fred
+# Get the all-items CPI (CPI-U, U.S. city average, seasonally adjusted) from
+# FRED. The all-items index converts prices to constant purchasing power
+# while leaving tobacco-specific price movements, such as tax increases, in
+# the data. The tobacco-only index (CUSR0000SEGA) would remove them
 dt_cpi <- data.table(fredr(
-  series_id = "CUSR0000SEGA",
+  series_id = "CPIAUCSL",
   observation_start = min(dt_monthly[, purchase_month]),
   observation_end = max(dt_monthly[, purchase_month]),
   frequency = "m"
@@ -276,7 +297,7 @@ dt_monthly[cig == 1 | cig_ecig == 1, real_per_pack_price_paid := per_pack_price_
 dt_monthly[ecig == 1 | cig_ecig == 1, real_per_mL_price_paid := per_mL_price_paid * (base_cpi / cpi)]
 dt_monthly[, cpi := NULL]
 
-# Ensure there aren't any NAs for the real per-unit prices
+# Check there are no NAs in the real per-unit prices (both should print 0)
 nrow(dt_monthly[(cig == 1 | cig_ecig == 1) & is.na(real_per_pack_price_paid)])
 nrow(dt_monthly[(ecig == 1 | cig_ecig == 1) & is.na(real_per_mL_price_paid)])
 
@@ -287,9 +308,10 @@ nrow(dt_monthly[(ecig == 1 | cig_ecig == 1) & is.na(real_per_mL_price_paid)])
 # panel
 #############################
 
-# Load in household information data
-file_name <- paste0("../tobacco_panelists_information_2021-Onward.rds")
-dt_households <- readRDS(file_name)
+# Household information for tobacco households comes from the full roster so
+# that years without a tobacco purchase carry that year's own demographics
+# (the tobacco household information file only covers purchase years)
+dt_households <- dt_roster[household_code %in% unique(dt_monthly[, household_code])]
 
 # Build HH-year grid from union of dt_monthly and dt_households
 hh_years <- unique(rbind(

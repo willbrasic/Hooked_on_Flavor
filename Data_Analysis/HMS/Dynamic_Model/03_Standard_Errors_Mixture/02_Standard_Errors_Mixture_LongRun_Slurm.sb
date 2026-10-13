@@ -6,14 +6,14 @@
 # --------------------------------------------------------------
 
 ### Optional. Set the job name
-#SBATCH --job-name=Dynamic_Mixture_Validation
+#SBATCH --job-name=Dynamic_Model_Mixture_Standard_Errors_LongRun
 
 
 # --------------------------------------------------------------
 # Output
 # --------------------------------------------------------------
 
-### Slurm stdout/stderr - captures Julia startup errors, module load failures, etc.
+### Slurm stdout/stderr: captures Julia startup errors, module load failures, etc.
 #SBATCH --output=slurm_%j.out
 #SBATCH --error=slurm_%j.err
 
@@ -50,36 +50,22 @@
 #SBATCH --mem-per-cpu=1gb
 
 ### REQUIRED. Specify the time required for this job, hhh:mm:ss
-#SBATCH --time=001:00:00
+#SBATCH --time=024:00:00
 
 
 # --------------------------------------------------------------
 # Estimation Flags
 # --------------------------------------------------------------
 
-# Forward flags to Julia.
-# Set at submission time (defaults apply if not provided).
+# Discount factor β, forwarded to Julia (default 1.0).
 #
-# Flags:
-#   BETA           (default: 1.0)    Present-bias β (must match the estimation run)
-#   ESTIMATE_PSI_3 (default: false)  Validate ψ_3-estimated model (reads ψ_3 from θ_hat[27])
-#   PSI_3          (default: 0.75)   Fixed ψ_3 value (ignored when ESTIMATE_PSI_3=true)
+# Usage:
+#   Base model (β = 1.0):
+#     sbatch 02_Standard_Errors_Mixture_LongRun_Slurm.sb
 #
-# Usage examples:
-#   Base model (β=1.0, ψ_3=0.75 fixed):
-#     sbatch 02_Validation_Mixture_Slurm.sb
-#
-#   Present-bias run (β=0.7):
-#     BETA=0.7 sbatch 02_Validation_Mixture_Slurm.sb
-#
-#   Fixed ψ_3 = 0.50:
-#     PSI_3=0.50 sbatch 02_Validation_Mixture_Slurm.sb
-#
-#   Estimated ψ_3 (reads from θ_hat[27]):
-#     ESTIMATE_PSI_3=true sbatch 02_Validation_Mixture_Slurm.sb
+#   Present bias (β = 0.70):
+#     BETA=0.70 sbatch 02_Standard_Errors_Mixture_LongRun_Slurm.sb
 export BETA=${BETA:-1.0}
-export ESTIMATE_PSI_3=${ESTIMATE_PSI_3:-false}
-export PSI_3=${PSI_3:-0.75}
 
 
 # --------------------------------------------------------------
@@ -92,8 +78,8 @@ module load julia
 # Set Julia threads for VFI parallelization over price states
 export JULIA_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-# Navigate to the script directory
-cd /home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/03_Validation_Mixture_V2
+# Change to the script directory
+cd /home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/03_Standard_Errors_Mixture
 
 # Run script
-julia 02_Validation_Mixture.jl
+julia 02_Standard_Errors_Mixture_LongRun.jl

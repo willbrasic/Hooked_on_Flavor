@@ -1,0 +1,97 @@
+#!/bin/sh
+
+
+# --------------------------------------------------------------
+# Job Name
+# --------------------------------------------------------------
+
+### Optional. Set the job name
+#SBATCH --job-name=Dynamic_Mixture_Vuong
+
+
+# --------------------------------------------------------------
+# Output
+# --------------------------------------------------------------
+
+### Slurm stdout/stderr - captures Julia startup errors, module load failures, etc.
+#SBATCH --output=slurm_%j.out
+#SBATCH --error=slurm_%j.err
+
+
+# --------------------------------------------------------------
+# Account and Notifications
+# --------------------------------------------------------------
+
+### REQUIRED. Specify the PI group for this job
+#SBATCH --account=fishback
+
+### Optional. Request email when job begins and ends
+### SBATCH --mail-type=BEGIN,END,FAIL
+
+### Optional. Specify email address to use for notification
+#SBATCH --mail-user=wbrasic@arizona.edu
+
+
+# --------------------------------------------------------------
+# Resources
+# --------------------------------------------------------------
+
+### REQUIRED. Set the partition for your job.
+#SBATCH --partition=standard
+
+### REQUIRED. Run on a single node with a single process.
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+
+### REQUIRED. Number of CPU cores for Julia threading. 94 is max for Puma and 28 is max for Ocelote
+#SBATCH --cpus-per-task=94
+
+### REQUIRED. Memory per core (total = cpus-per-task × mem-per-cpu).
+#SBATCH --mem-per-cpu=5gb
+
+### REQUIRED. Specify the time required for this job, hhh:mm:ss
+#SBATCH --time=004:00:00
+
+
+# --------------------------------------------------------------
+# Estimation Flags
+# --------------------------------------------------------------
+
+# Forward flags to Julia.
+# Set at submission time (defaults apply if not provided).
+#
+# Flags:
+#   PSI_3          (default: 0.50)   Seed for the flavored habit grid (ψ_3 itself is parameter 28 of the estimates)
+#   BETA_A         (default: 1.0)    First β compared (model A; positive statistic favors it)
+#   BETA_B         (default: 0.7)    Second β compared (model B; negative statistic favors it)
+#
+# Both β values are evaluated in a single run, since the test differences their
+# per-household log-likelihoods. Output lands in
+# Vuong_Test_Mixture_<psi_tag>_Beta_<A>_vs_Beta_<B>_Results/.
+#
+# Usage examples:
+#   Default (β = 1.0 versus β = 0.7):
+#     sbatch 02_Vuong_Test_Slurm_Mixture.sb
+#
+#   A different pair:
+#     BETA_A=1.0 BETA_B=0.8 sbatch 02_Vuong_Test_Slurm_Mixture.sb
+export PSI_3=${PSI_3:-0.50}
+export BETA_A=${BETA_A:-1.0}
+export BETA_B=${BETA_B:-0.7}
+
+
+# --------------------------------------------------------------
+# Execution
+# --------------------------------------------------------------
+
+# Load Julia module
+module load julia
+
+# Set Julia threads for VFI parallelization over price states
+export JULIA_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+# Change to the script directory
+cd /home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/06_Vuong_Test_Mixture
+
+# Run script
+julia 02_Vuong_Test_Mixture.jl

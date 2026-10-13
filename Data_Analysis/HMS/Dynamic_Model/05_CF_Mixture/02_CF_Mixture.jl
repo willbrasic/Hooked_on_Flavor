@@ -7,8 +7,8 @@
 # This script simulates the effect of a flavored tobacco product ban on
 # consumer choices, addiction, and welfare using the K=3 mixture model.
 #
-# Three ban types are evaluated (apply_flavor_ban!, apply_fda_flavor_ban!,
-# apply_non_fda_ban!), plus a flavor tax counterfactual (apply_flavor_tax!).
+# Two ban types are evaluated (apply_flavor_ban!, apply_non_fda_ban!), plus a
+# flavor tax counterfactual (apply_flavor_tax!).
 #
 # For each ban type / tax level and β in BETA_GRID: solve VFI under SQ and
 # the policy, compute posterior type probabilities and pointwise choice
@@ -27,9 +27,8 @@
 BETA_VAL = parse(Float64, get(ENV, "BETA", "1.0"))
 
 # Flavored habit decay rate ψ_3
-# If ESTIMATE_PSI_3=true, ψ_3 was estimated jointly as the 27th parameter.
-# If false (default), ψ_3 is fixed at PSI_3 (read from ENV, default 0.50).
-ESTIMATE_PSI_3 = parse(Bool, get(ENV, "ESTIMATE_PSI_3", "false"))
+# ψ_3 is estimated jointly as parameter 28. PSI_3 only seeds the flavored habit grid.
+ESTIMATE_PSI_3 = true   # ψ_3 is always estimated jointly as parameter 28
 PSI_3 = parse(Float64, get(ENV, "PSI_3", "0.50"))
 
 # Detect whether I am running on the HPC (any non-Windows system)
@@ -41,19 +40,18 @@ using Random  # CRN seeding for forward simulations
 if HPC
 
     # Load mixture estimation functions and packages 
-    include("/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/02_Second_Stage_Estimation_V2/01_Functions_Mixture.jl")
+    include("/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/02_Second_Stage_Estimation_Mixture/01_Functions_Mixture.jl")
 
     # Load counterfactual-specific functions
-    include("/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/04_CF_Mixture_V2/01_CF_Functions_Mixture.jl")
+    include("/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/05_CF_Mixture/01_CF_Functions_Mixture.jl")
 
     # Construct psi, beta, and psi_3 tags for directory and file naming 
     psi_tag   = "Psi2_09_Psi1_01"
-    psi_3_tag = ESTIMATE_PSI_3 ? "Psi3_Est" : "Psi3_$(numeric_tag(PSI_3))"
     _, _, β_naming, _ = get_fixed_parameters()
     beta_tag = numeric_tag(BETA_VAL)
 
-    # Output path is β-specific so each β value gets its ownresults directory.
-    output_dir = "/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/04_CF_Mixture_V2/CF_Mixture_$(psi_tag)_$(psi_3_tag)_Beta_$(beta_tag)_Results"
+    # Output path is β-specific so each β value gets its own results directory.
+    output_dir = "/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/05_CF_Mixture/CF_Mixture_$(psi_tag)_Beta_$(beta_tag)_Results"
 
     # Create output directory if it doesn't exist
     mkpath(output_dir)
@@ -70,12 +68,11 @@ else
 
     # Construct psi, beta, and psi_3 tags for directory and file naming 
     psi_tag   = "Psi2_09_Psi1_01"
-    psi_3_tag = ESTIMATE_PSI_3 ? "Psi3_Est" : "Psi3_$(numeric_tag(PSI_3))"
     _, _, β_naming, _ = get_fixed_parameters()
     beta_tag = numeric_tag(BETA_VAL)
 
     # Output path is β-specific so each β value gets its own top-level results directory.
-    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/CF_Mixture_$(psi_tag)_$(psi_3_tag)_Beta_$(beta_tag)_Results"
+    output_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/CF_Mixture_$(psi_tag)_Beta_$(beta_tag)_Results"
 
     # Create output directory if it doesn't exist
     mkpath(output_dir)
@@ -219,8 +216,7 @@ p_cig_lo, p_cig_hi, p_cig_w, p_ecig_lo, p_ecig_hi, p_ecig_w = precompute_price_t
 
 # Map observed household prices to continuous values for interpolation
 # p_continuous is N × 2 (cig price, ecig price): actual per-unit prices, not grid indices
-# P_obs_cig / P_obs_ecig are N × N_J matrices of bin-specific prices (not used in CF, discarded)
-_, p_continuous, _, _ = map_prices_to_grid(N_P, P, Pcomb, N_J);
+_, p_continuous = map_prices_to_grid(N_P, P, Pcomb, N_J);
 
 # Log data setup completion time and sample size
 setup_elapsed = time() - t_setup;
@@ -251,7 +247,7 @@ log_msg("AR(1) parameters loaded")
 
 #############################
 # 10. Parameter Loading
-#     (Per β — See Section 13)
+#     (Per β, See Section 13)
 #############################
 
 # Structural parameters and PSI_3 differ by β (each was estimated separately),
@@ -371,15 +367,15 @@ for _bv in BETA_GRID
     _beta_tag = "Beta_$(numeric_tag(_bv))"
 
     if HPC
-        _est_dir = "/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/02_Second_Stage_Estimation_V2/Dynamic_Model_Mixture_V2_$(psi_tag)_$(_beta_tag)_$(psi_3_tag)_Results"
+        _est_dir = "/home/u2/wbrasic/4th_Year_Paper/Dynamic_Model/02_Second_Stage_Estimation_Mixture/Dynamic_Model_Mixture_$(psi_tag)_$(_beta_tag)_Results"
     else
-        _est_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Mixture_$(psi_tag)_$(_beta_tag)_$(psi_3_tag)_Results"
+        _est_dir = "C:/Users/wbras/OneDrive/Documents/Desktop/UA/4th_Year_Paper/4th_Year_Paper_Data/HMS/2021-Onward/Dynamic_Model/Dynamic_Model_Mixture_$(psi_tag)_$(_beta_tag)_Results"
     end
 
     _est_path = joinpath(
         _est_dir,
-        "Dynamic_Model_Mixture_V2_$(psi_tag)_$(_beta_tag)_$(psi_3_tag)_Estimates",
-        "Dynamic_Model_Mixture_V2_$(psi_tag)_$(_beta_tag)_$(psi_3_tag)_Estimates.csv"
+        "Dynamic_Model_Mixture_$(psi_tag)_$(_beta_tag)_Estimates",
+        "Dynamic_Model_Mixture_$(psi_tag)_$(_beta_tag)_Estimates.csv"
     )
 
     _df_est = CSV.read(_est_path, DataFrame)
@@ -390,22 +386,24 @@ for _bv in BETA_GRID
     _N_params    = length(_param_names)
     _θ_hat       = Float64.(collect(_df_est[1, :]))
 
-    log_msg(@sprintf("\nβ = %.2f — loaded from: %s", _bv, _est_path))
+    log_msg(@sprintf("\nβ = %.2f, loaded from: %s", _bv, _est_path))
     log_msg("Parameters:")
     for k in 1:_N_params
         log_msg("  $(_param_names[k]) = $(_θ_hat[k])")
     end
 
-    _common  = _θ_hat[1:13]
-    _ξ_1     = _θ_hat[14:16]
-    _ξ_2     = _θ_hat[17:19]
-    _ξ_3     = _θ_hat[20:22]
-    _π_0_2   = _θ_hat[23]
-    _π_TYA_2 = _θ_hat[24]
-    _π_0_3   = _θ_hat[25]
-    _π_TYA_3 = _θ_hat[26]
+    # 28-parameter layout, as in 02_Second_Stage_Estimation_Mixture
+    length(_θ_hat) == 28 || error("Expected 28 parameters; got $(length(_θ_hat)) from $_est_path")
+    _common  = _θ_hat[1:14]    # α_C, α_E, α_E2, α_CE, λ_1-λ_4, γ_1-γ_4, ω_C, ω_E
+    _ξ_1     = _θ_hat[15:17]
+    _ξ_2     = _θ_hat[18:20]
+    _ξ_3     = _θ_hat[21:23]
+    _π_0_2   = _θ_hat[24]
+    _π_TYA_2 = _θ_hat[25]
+    _π_0_3   = _θ_hat[26]
+    _π_TYA_3 = _θ_hat[27]
 
-    _PSI_3 = ESTIMATE_PSI_3 ? _θ_hat[27] : PSI_3
+    _PSI_3 = ESTIMATE_PSI_3 ? _θ_hat[28] : PSI_3
     if ESTIMATE_PSI_3
         log_msg(@sprintf("  ψ_3 = %.6f (estimated)", _PSI_3))
     else
@@ -480,7 +478,7 @@ for _bv in BETA_GRID
         π_TYA_2          = _π_TYA_2,
         π_0_3            = _π_0_3,
         π_TYA_3          = _π_TYA_3,
-        omega_E_est      = _common[13]
+        omega_E_est      = _common[14]
     )
 
 end  # end β pre-loading loop
@@ -554,7 +552,6 @@ cat_labels = ["Outside", "Cig", "Orig Ecig", "Non-FDA Flav Ecig", "FDA Flav Ecig
 # Tuple of ban types and ban functions
 BAN_TYPES = [
     ("Ban_Comprehensive", apply_flavor_ban!),
-    ("Ban_FDA_Only", apply_fda_flavor_ban!),
     ("Ban_Non_FDA", apply_non_fda_ban!)
 ]
 
@@ -883,7 +880,7 @@ for (ban_label, ban_fn!) in BAN_TYPES
         # Forward Simulation
         # (Mixture with CRN)
         # (Does not depend on pricing
-        #  scenario — uses AR(1)
+        #  scenario; uses AR(1)
         #  prices for both SQ and ban)
         #############################
 
@@ -2216,27 +2213,20 @@ if !HPC
         log_msg("  Written: $(basename(path))")
     end
 
-    # Column helpers
+    # Column totals
     cig_total(df, t, pre) = df[t, "$(pre)_cig"] + df[t, "$(pre)_orig_bundle"] + df[t, "$(pre)_non_fda_flav_bundle"] + df[t, "$(pre)_fda_flav_bundle"]
     orig_ecig_total(df, t, pre)   = df[t, "$(pre)_orig_ecig"] + df[t, "$(pre)_orig_bundle"]
-    non_fda_flav_total(df, t, pre) = df[t, "$(pre)_non_fda_flav_ecig"] + df[t, "$(pre)_non_fda_flav_bundle"]
 
     # Load all simulation data
-    # comp[bl][grp], fda[bl][grp], tax[tau_tag][bl][grp]  where grp = "tya" (TYA-present only)
+    # comp[bl][grp], tax[tau_tag][bl][grp]  where grp = "tya" (TYA-present only)
     comp = Dict{String, Dict{String, DataFrame}}()
-    fda  = Dict{String, Dict{String, DataFrame}}()
     tax  = Dict{String, Dict{String, Dict{String, DataFrame}}}()
 
     for bl in blabels
         p_comp = joinpath(output_dir, "Ban_Comprehensive", "Simulation_by_TYA.csv")
-        p_fda  = joinpath(output_dir, "Ban_FDA_Only",     "Simulation_by_TYA.csv")
         if isfile(p_comp)
             t1 = load_tya_split(p_comp)
             comp[bl] = Dict("tya" => t1)
-        end
-        if isfile(p_fda)
-            t1 = load_tya_split(p_fda)
-            fda[bl] = Dict("tya" => t1)
         end
     end
 
@@ -2259,7 +2249,6 @@ if !HPC
     for (grp, suffix) in [("tya", "TYA")]
 
         comp_ok = all(haskey(comp, bl) for bl in blabels)
-        fda_ok  = all(haskey(fda,  bl) for bl in blabels)
 
         sq_hdr  = join(["sq_$bl"  for bl in blabels], " ")
         ban_hdr = join(["ban_$bl" for bl in blabels], " ")
@@ -2284,45 +2273,6 @@ if !HPC
                                [orig_ecig_total(comp[bl][grp], t, "ban") for bl in blabels]]
                     for t in 1:T_fig]
             write_fig_txt(joinpath(fig_dir, "10_Total_Orig_Ecig_Share_Trajectory_$(suffix).txt"),
-                          "period $sq_hdr $ban_hdr", rows)
-
-        end
-
-        if comp_ok && fda_ok
-
-            # ---- Enforcement gap (pre-computed pcts, per-beta sq) ----
-            pct_hdr = join(["comp_$bl fda_$bl" for bl in blabels], " ")
-            rows = [[float(t); vcat([[100.0 * (comp[bl][grp][t, :ban_addiction] / comp[bl][grp][t, :sq_addiction] - 1),
-                                      100.0 * (fda[bl][grp][t,  :ban_addiction] / comp[bl][grp][t, :sq_addiction] - 1)]
-                                     for bl in blabels]...)]
-                    for t in 1:T_fig]
-            write_fig_txt(joinpath(fig_dir, "11_Enforcement_Gap_Addiction_$(suffix).txt"),
-                          "period $pct_hdr", rows)
-
-            # ---- Figure 12: FDA-only ban ----
-            rows = [[float(t); [fda[bl][grp][t, :sq_addiction]  for bl in blabels];
-                               [fda[bl][grp][t, :ban_addiction] for bl in blabels]]
-                    for t in 1:T_fig]
-            write_fig_txt(joinpath(fig_dir, "12_FDA_Addiction_Trajectory_$(suffix).txt"),
-                          "period $sq_hdr $ban_hdr", rows)
-
-            rows = [[float(t); [cig_total(fda[bl][grp], t, "sq")  for bl in blabels];
-                               [cig_total(fda[bl][grp], t, "ban") for bl in blabels]]
-                    for t in 1:T_fig]
-            write_fig_txt(joinpath(fig_dir, "12_FDA_Total_Cig_Share_Trajectory_$(suffix).txt"),
-                          "period $sq_hdr $ban_hdr", rows)
-
-            rows = [[float(t); [orig_ecig_total(fda[bl][grp], t, "sq")  for bl in blabels];
-                               [orig_ecig_total(fda[bl][grp], t, "ban") for bl in blabels]]
-                    for t in 1:T_fig]
-            write_fig_txt(joinpath(fig_dir, "12_FDA_Total_Orig_Ecig_Share_Trajectory_$(suffix).txt"),
-                          "period $sq_hdr $ban_hdr", rows)
-
-            # ---- Unauthorized flavor share under FDA-only ban ----
-            rows = [[float(t); [non_fda_flav_total(fda[bl][grp], t, "sq")  for bl in blabels];
-                               [non_fda_flav_total(fda[bl][grp], t, "ban") for bl in blabels]]
-                    for t in 1:T_fig]
-            write_fig_txt(joinpath(fig_dir, "13_Unauthorized_Flav_Share_$(suffix).txt"),
                           "period $sq_hdr $ban_hdr", rows)
 
         end

@@ -37,7 +37,7 @@ options(max.print = 999999)
 # Increase the data table print limit
 options(datatable.print.nrows = 20)
 
-# Vector for years of data we are interested in 
+# Vector for years of data I am interested in
 years <- 2021:2023
 
 
@@ -66,10 +66,20 @@ for(year in years)
 
 # Make `multi_hms` column equal to 1 when it is 0
 # This simplifies consumption calculations
-list_purchases <- lapply(list_purchases, function(dt) 
+list_purchases <- lapply(list_purchases, function(dt)
 {
   dt <- dt[multi_hms == 0, multi_hms := 1]
-  
+
+  dt
+})
+
+# Net out coupons so that prices reflect what the household actually paid.
+# Nielsen records `total_price_paid` before coupons and `coupon_value` separately.
+# Every per-unit price and price total below is built from this net amount.
+list_purchases <- lapply(list_purchases, function(dt)
+{
+  dt[, total_price_paid := pmax(total_price_paid - coupon_value, 0)]
+
   dt
 })
 
@@ -203,9 +213,9 @@ nicotine_mg_absorbed_per_pack <- nicotine_mg_absorbed_per_cig * 20
 # Initialize columns 
 list_purchases <- lapply(list_purchases, function(dt) 
 {
-  dt[, `:=` (total_cigs = NA_integer_, 
+  dt[, `:=` (total_cigs = NA_integer_,
              total_packs = NA_integer_,
-             consumption_in_cigs = NA_integer_,
+             consumption_in_cigs = NA_real_,   # double: e-cig cigarette-equivalents are fractional
              consumption_in_packs = NA_real_, 
              cig_nicotine_mg_consumed = NA_real_, 
              cig_nicotine_mg_absorbed = NA_real_, 
@@ -318,7 +328,7 @@ list_purchases <- lapply(list_purchases, function(dt)
   dt
 })
 
-# # Ensure everything looks good
+# # Check that everything looks right
 # dt_unique <- unique(
 #   rbindlist(list_purchases)[
 #     cig == 1, .(upc, category, multi_hms, quantity, total_size_num,
@@ -362,7 +372,7 @@ list_purchases <- lapply(list_purchases, function(dt)
   print(paste0("High Median: ", median_high))
   
   # Replace tails with respective medians 
-  # Ensure $0.00 per-pack price paid is not used
+  # Do not use a $0.00 per-pack price as the replacement
   if (median_low != 0)
   {
     dt[cig == 1 & per_pack_price_paid <= low, per_pack_price_paid := median_low]
@@ -384,7 +394,7 @@ list_purchases <- lapply(list_purchases, function(dt)
   dt
 })
 
-# # Ensure everything looks good
+# # Check that everything looks right
 # dt_cig <- rbindlist(list_purchases)[cig == 1, ][order(household_code, purchase_date)]
 # vals <- dt_cig[, per_pack_price_paid]
 # low <- quantile(vals, probs = 0.005, na.rm = TRUE)
@@ -461,7 +471,16 @@ list_purchases <- lapply(list_purchases, function(dt)
                      | grepl("TORCH DIAMOND", product_descr, ignore.case = TRUE)
                      | grepl("KALIBLOOM", product_descr, ignore.case = TRUE)
                      | secondary_size_unit == "GRAM"))]
-  
+
+})
+
+# Drop empty refillable pods (SMOK Novo 2, Novo X, V18 Mini, Ferrochrome; Geek Vape).
+# These are hardware sold without e-liquid, so they carry no nicotine
+empty_pod_upcs <- c("694069563087", "694069563089", "694069565419", "694069569586", "697189424973")
+list_purchases <- lapply(list_purchases, function(dt)
+{
+  dt[!(ecig == 1 & upc %in% empty_pod_upcs)]
+
 })
 
 # # Drop marlboro heat stick device as it does not appear to be an
@@ -484,8 +503,10 @@ list_purchases <- lapply(list_purchases, function(dt)
   
 })
 
-# Correct segment and segment code for certain product
-list_purchases <- lapply(list_purchases, function(dt) 
+# Fold the rechargeable segment into the disposable segment. Nielsen's
+# rechargeable label covers prefilled pod devices that function as disposables
+# for the purposes of this analysis, so the two segments are treated as one
+list_purchases <- lapply(list_purchases, function(dt)
 {
   dt[ecig == 1 & segment == "ELECTRONIC CIGARETTES RECHARGEABLE",
      `:=`(
@@ -503,29 +524,31 @@ list_purchases <- lapply(list_purchases, function(dt)
 # )[order(FLAVOR)]
 # View(dt_unique)
 
-# Correct issue where FLAVOR is NOT STATED for a certain upc, but the 
-# e-cig is in fact flavored
-list_purchases <- lapply(list_purchases, function(dt)
-{
-  dt[ecig == 1 & upc == "85003598399", flavored_ecig := 1]
-  
-  dt
-})
-
 # Assign flavored e-cig or not
 list_purchases <- lapply(list_purchases, function(dt)
 {
-  dt[ecig == 1, 
-     `:=` (flavored_ecig = fifelse(FLAVOR %in% c("NOT STATED", "ORIGINAL") 
+  dt[ecig == 1,
+     `:=` (flavored_ecig = fifelse(FLAVOR %in% c("NOT STATED", "ORIGINAL")
                               | grepl("TOBACCO", FLAVOR, ignore.case = TRUE)
                               | grepl("REGULAR", FLAVOR, ignore.case = TRUE)
                               | grepl("CLEAR", FLAVOR, ignore.case = TRUE), 0, 1))]
   dt[ecig == 1, original_ecig := fifelse(flavored_ecig == 0, 1, 0)]
-  
+
   dt
 })
 
-# # Ensure everything looks good
+# Correct issue where FLAVOR is NOT STATED for a certain upc, but the
+# e-cig is in fact flavored. This must run after the general assignment
+# above, which would otherwise overwrite it
+list_purchases <- lapply(list_purchases, function(dt)
+{
+  # Hyde Rebel Pro (85003598399) and High Class Alien Fruit e-liquid (76068006075)
+  dt[ecig == 1 & upc %in% c("85003598399", "76068006075"), `:=` (flavored_ecig = 1, original_ecig = 0)]
+
+  dt
+})
+
+# # Check that everything looks right
 # dt_unique <- unique(
 #   rbindlist(list_purchases)[
 #     ecig == 1, .(upc, FLAVOR, original_ecig, flavored_ecig, product_descr)
@@ -536,7 +559,10 @@ list_purchases <- lapply(list_purchases, function(dt)
 # Indicator FDA authorized e-cigarette purchases
 list_purchases <- lapply(list_purchases, function(dt) 
 {
-  brands <- c("JUUL", "LOGIC (LOGICECIG)", "NJOY (NJOY)", "VUSE")
+  # Brands holding an FDA marketing granted order as of October 2026 (brand-level
+  # classification): Vuse (2021-2024), NJOY (2022, menthol 2024), Logic (2022),
+  # Juul (2025), Glas (May 2026)
+  brands <- c("JUUL", "LOGIC (LOGICECIG)", "NJOY (NJOY)", "VUSE", "GLAS (GLAS)")
   dt[ecig == 1, fda_authorized_ecig := fifelse(BRAND %in% brands, 1, 0)]
   
   dt
@@ -584,11 +610,11 @@ list_purchases <- lapply(list_purchases, function(dt)
 })
 
 # # Write unique e-cig product data to a file so I can obtain sizes
-# # and nicotine in mg per mL. Note, `secondary_size_num` already takes
+# # and nicotine in mg per mL. `secondary_size_num` already takes
 # # into account if it comes in a pack of of > 1. For instance, if
 # # the e-liquid is 1mL and the `total_size_num` is 2, then
 # # `secondary_size_num` would be 2mL.
-# # Note, after going into excel and
+# # After going into excel and
 # # looking up the products and filling in the .csv in excel,
 # # this code block SHOULD NEVER BE RAN AGAIN until I get the data for
 # # the next year.
@@ -638,7 +664,7 @@ list_purchases <- lapply(list_purchases, function(dt)
   dt
 })
 
-# # Ensure everything looks good
+# # Check that everything looks right
 # dt_unique <- unique(
 #   rbindlist(list_purchases)[
 #     ecig == 1, .(upc, segment, nicotine_mg_consumed_per_mL, secondary_size_num, secondary_size_unit, total_size_num, total_size_unit, product_descr)
@@ -649,7 +675,7 @@ list_purchases <- lapply(list_purchases, function(dt)
 # Fill in total e-liquid, consumption, and nicotine columns
 list_purchases <- lapply(list_purchases, function(dt) 
 {
-  # Notice that I don't also multiply by `total_size_num`
+  # I don't also multiply by `total_size_num`
   # b/c `secondary_size_num` already takes that information into account
   dt[ecig == 1, total_mL := multi_hms * quantity * secondary_size_num]
   
@@ -668,7 +694,7 @@ list_purchases <- lapply(list_purchases, function(dt)
   dt
 })
 
-# # Ensure everything looks good
+# # Check that everything looks right
 # dt_unique <- unique(
 #   rbindlist(list_purchases)[
 #     ecig == 1 , .(upc, category, multi_hms, quantity, secondary_size_num,
@@ -712,7 +738,7 @@ list_purchases <- lapply(list_purchases, function(dt)
   print(paste0("High Median: ", median_high))
   
   # Replace tails with respective medians 
-  # Ensure $0.00 per-mL price paid is not used
+  # Do not use a $0.00 per-mL price as the replacement
   if (median_low != 0)
   {
     dt[ecig == 1 & per_mL_price_paid <= low, per_mL_price_paid := median_low]
@@ -734,7 +760,7 @@ list_purchases <- lapply(list_purchases, function(dt)
   dt
 })
 
-# # Ensure everything looks good
+# # Check that everything looks right
 # dt_ecig <- rbindlist(list_purchases)[ecig == 1, ][order(household_code, purchase_date)]
 # vals <- dt_ecig[, per_mL_price_paid]
 # low <- quantile(vals, probs = 0.01, na.rm = TRUE)
@@ -961,8 +987,9 @@ list_purchases <- lapply(list_purchases, function(dt)
   dt
 })
 
-# Create column for if household is in a state with flavored e-cig bans 
-states_with_flavor_bans <- c(6, 25, 34, 36, 44, 49)
+# Create column for if household is in a state with a flavored e-cig ban in
+# force during 2021-2023: CA (Dec 2022), MA, NJ, NY, RI. Utah's ban began in 2025
+states_with_flavor_bans <- c(6, 25, 34, 36, 44)
 list_purchases <- lapply(list_purchases, function(dt) 
 {
   dt[, state_flavor_ban := fifelse(
