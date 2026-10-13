@@ -100,11 +100,7 @@ Reduced-form empirical evidence motivating features of the structural model.
 | `02_Transition_Matrix.R` | Estimates household-level choice persistence matrices across tobacco product categories (cigarettes, flavored e-cigs, unflavored e-cigs, outside good). |
 | `04_Relapse_Analysis.R` | Analyzes purchase streak lengths and relapse patterns after cessation spells. |
 | `05_Stockpiling_Test.R` | Tests for stockpiling behavior. |
-| `06_CA_Synthetic_Control.R` | Synthetic control for California cigarette and unflavored e-cigarette prices around the December 2022 California flavor ban. |
-| `07_Repeated_Quit_Attempts.R` | Counts distinct abstention spells per household to document repeated quit attempts, a signature of present bias. |
 | `09_Flavor_Persistence_Regression.R` | Regresses current flavored e-cigarette purchase on its lag, controlling for lagged e-cigarette consumption, to document flavor-specific state dependence. |
-| `10_Initial_Conditions_Time_Trend.R` | Tests for within-household time trends in consumption with household and month fixed effects, a check on the initial-conditions assumption. |
-| `11_Elf_Bar_Enforcement_Event_Study.R` | Event study around the FDA's 2023 enforcement actions against Elf Bar, comparing households that bought the named brands with other unauthorized flavored e-cigarette buyers. |
 
 ---
 
